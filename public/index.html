@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Enquiry Audit</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <h1>Enquiry Audit</h1>
+      <p class="lede">Reads a business's enquiry mailboxes and shows how many enquiries came in, how quickly they were answered and how many were missed. It only reads email headers, never changes anything in the mailbox, and doesn't keep passwords.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <form id="setup" class="no-print" autocomplete="off">
+      <section class="card">
+        <h2><span class="num">1</span> Business and mailboxes</h2>
+        <label class="field">Business name <small>(for the report heading)</small>
+          <input name="businessName" placeholder="e.g. Darryn's Plumbing">
+        </label>
+        <div id="mailboxes"></div>
+        <button type="button" class="link" id="addMailbox">+ Add another mailbox</button>
+        <details class="more">
+          <summary>More options</summary>
+          <label class="field">Other addresses the business replies from <small>(comma separated, e.g. a personal Gmail)</small>
+            <input name="otherAddresses" placeholder="darryn.smith@gmail.com">
+          </label>
+          <label class="field">Never count mail from <small>(one per line or comma separated; part of an address is enough)</small>
+            <textarea name="ignoreSenders" rows="2" placeholder="supplier.co.uk&#10;accounts@"></textarea>
+          </label>
+        </details>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">2</span> Period</h2>
+        <div class="row">
+          <label class="field">Before: from <input type="date" name="aFrom" required></label>
+          <label class="field">to <input type="date" name="aTo" required></label>
+        </div>
+        <label class="check"><input type="checkbox" name="compare"> Compare with a second period (e.g. after the enquiry app went live)</label>
+        <div class="row" id="afterRow" hidden>
+          <label class="field">After: from <input type="date" name="bFrom"></label>
+          <label class="field">to <input type="date" name="bTo"></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">3</span> Working hours and time spent</h2>
+        <div class="row">
+          <label class="field">Time zone <select name="tz"></select></label>
+          <label class="field">Opens <input type="time" name="workStart" value="09:00"></label>
+          <label class="field">Closes <input type="time" name="workEnd" value="17:30"></label>
+        </div>
+        <div class="days" id="workDays"></div>
+        <div class="row">
+          <label class="field">Minutes spent per enquiry, before <small>(timed or estimated)</small>
+            <input type="number" name="minsA" min="0" step="0.5" placeholder="e.g. 12">
+          </label>
+          <label class="field after-only" hidden>Minutes per enquiry, after
+            <input type="number" name="minsB" min="0" step="0.5" placeholder="e.g. 3">
+          </label>
+        </div>
+        <p class="hint">Email can't show how long someone spends on each enquiry. Time 10–20 enquiries with a stopwatch and enter the average here.</p>
+      </section>
+
+      <section class="card run">
+        <label class="field">Access key <small>(set in Vercel as AUDIT_ACCESS_KEY)</small>
+          <input type="password" name="accessKey" required autocomplete="current-password">
+        </label>
+        <div class="actions">
+          <button type="submit" class="primary" id="runBtn">Run audit</button>
+          <label class="button secondary">Open a saved audit<input type="file" id="openFile" accept=".json,application/json" hidden></label>
+        </div>
+        <div id="status" role="status" aria-live="polite"></div>
+      </section>
+    </form>
+
+    <section id="results" hidden></section>
+  </main>
+
+  <template id="mailboxTpl">
+    <div class="mailbox">
+      <div class="row">
+        <label class="field">Email address <input type="email" data-k="email" required placeholder="enquiries@business.co.uk" autocomplete="off"></label>
+        <label class="field">Password <input type="password" data-k="password" required autocomplete="new-password"></label>
+        <button type="button" class="remove" title="Remove this mailbox" aria-label="Remove this mailbox">×</button>
+      </div>
+      <details class="more">
+        <summary>Server settings <small>(only if it can't find them itself)</small></summary>
+        <div class="row">
+          <label class="field">Incoming (IMAP) server <input data-k="host" placeholder="mail.business.co.uk"></label>
+          <label class="field narrow">Port <input type="number" data-k="port" placeholder="993"></label>
+          <label class="field">Username <input data-k="user" placeholder="usually the email address"></label>
+        </div>
+        <label class="check"><input type="checkbox" data-k="secure" checked> SSL/TLS</label>
+      </details>
+    </div>
+  </template>
+
+  <script src="metrics.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

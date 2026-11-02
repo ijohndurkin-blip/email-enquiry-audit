@@ -1,0 +1,19 @@
+{
+  "name": "email-enquiry-audit",
+  "version": "1.0.0",
+  "description": "Reads a business's enquiry mailboxes (read-only, over IMAP) and reports how many enquiries came in, how fast they were answered and how many were missed. Built for before-and-after case studies.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "node dev-server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "imapflow": "^2.4.2"
+  }
+}
