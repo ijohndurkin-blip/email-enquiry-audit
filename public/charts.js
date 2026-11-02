@@ -49,23 +49,23 @@
    * Vertical bars along a sequence (weeks, days, hours).
    * rows: [{ label, short, values: [n per series], shade? }] — shade marks e.g. opening hours.
    */
-  function vbar({ title, takeaway, rows, series, legendSeries, unit = 'enquiries', shadeLabel, labelEvery = 1, wide }) {
+  function vbar({ title, takeaway, rows, series, legendSeries, unit = 'enquiries', shadeLabel, labelEvery = 1, wide, format = fmt }) {
     const max = Math.max(1, ...rows.flatMap((r) => r.values));
     const nonZero = rows.flatMap((r) => r.values).filter((v) => v > 0).length;
     const labelAll = rows.length * series.length <= 16 || nonZero <= 10;
     const peak = Math.max(...rows.flatMap((r) => r.values));
     const body = `<div class="vchart">
       <div class="vbars" style="--cols:${rows.length}">${rows.map((r, ri) => `
-        <div class="vcol${r.shade ? ' shade' : ''}" tabindex="0" data-tip="${esc(`${r.label}: ${r.values.map((v, i) => `${series.length > 1 ? `${series[i].name} ` : ''}${fmt(v)}`).join(', ')} ${unit}`)}">
+        <div class="vcol${r.shade ? ' shade' : ''}" tabindex="0" data-tip="${esc(`${r.label}: ${r.values.map((v, i) => `${series.length > 1 ? `${series[i].name} ` : ''}${format(v)}`).join(', ')}${unit ? ` ${unit}` : ''}`)}">
           <div class="vgroup">${r.values.map((v, i) => `
-            <div class="vslot"><span class="vval">${v > 0 && (labelAll || v === peak) ? fmt(v) : ''}</span><div class="vbar ${r.cls || series[i].cls}" style="height:${(v / max) * 100}%"></div></div>`).join('')}
+            <div class="vslot"><span class="vval">${v > 0 && (labelAll || v === peak) ? format(v) : ''}</span><div class="vbar ${r.cls || series[i].cls}" style="height:${(v / max) * 100}%"></div></div>`).join('')}
           </div>
           <span class="vlabel">${ri % labelEvery === 0 ? esc(r.short || r.label) : ''}</span>
         </div>`).join('')}
       </div>
       ${shadeLabel ? `<p class="shade-note"><i class="shade-key"></i>${esc(shadeLabel)}</p>` : ''}
     </div>`;
-    const table = numbersTable(['', ...series.map((s) => s.name)], rows.map((r) => [r.label, ...r.values.map(fmt)]));
+    const table = numbersTable(['', ...series.map((s) => s.name)], rows.map((r) => [r.label, ...r.values.map(format)]));
     return frame({ title, takeaway, body, series: legendSeries || series, table, wide });
   }
 

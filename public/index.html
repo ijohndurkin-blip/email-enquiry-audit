@@ -35,10 +35,10 @@
       <section class="card">
         <h2><span class="num">1</span> Business and mailboxes</h2>
         <div class="row profile-row">
-          <label class="field">Saved businesses
+          <label class="field">Companies <small id="storeNote">(saved on this browser)</small>
             <select id="profileSel"></select>
           </label>
-          <button type="button" class="secondary" id="deleteProfile" hidden>Delete saved business</button>
+          <button type="button" class="secondary" id="deleteProfile" hidden>Delete company</button>
         </div>
         <label class="field">Business name <small>(for the report heading)</small>
           <input name="businessName" placeholder="e.g. Darryn's Plumbing">
@@ -46,7 +46,7 @@
         <label class="field">What the business does <small>(optional; helps the AI tell enquiries apart from other mail)</small>
           <input name="about" placeholder="e.g. Plumber and heating engineer in Liverpool: boilers, bathrooms, leaks">
         </label>
-        <p class="hint">Add each address enquiries arrive at. Enter the email and password, then press <b>Test connection</b>. Once it's connected, the business is saved on this browser for next time.</p>
+        <p class="hint">Add each address enquiries arrive at. Enter the email and password, then press <b>Test connection</b>. Once it's connected, the company is saved for next time.</p>
         <div id="mailboxes"></div>
         <button type="button" class="link" id="addMailbox">+ Add another mailbox</button>
         <details class="more">
@@ -59,6 +59,8 @@
           </label>
         </details>
       </section>
+
+      <section class="card tracker" id="trackerCard" hidden></section>
 
       <section class="card">
         <h2><span class="num">2</span> Period</h2>
@@ -82,10 +84,10 @@
         </div>
         <div class="days" id="workDays"></div>
         <div class="row">
-          <label class="field">Minutes spent per enquiry, before <small>(timed or estimated)</small>
+          <label class="field">Minutes per enquiry before the app <small>(timed or estimated)</small>
             <input type="number" name="minsA" min="0" step="0.5" placeholder="e.g. 12">
           </label>
-          <label class="field after-only" hidden>Minutes per enquiry, after
+          <label class="field">Minutes per enquiry with the app
             <input type="number" name="minsB" min="0" step="0.5" placeholder="e.g. 3">
           </label>
         </div>

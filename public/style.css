@@ -311,3 +311,23 @@ table.mini .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
   .list thead { display: table-header-group; }
   .print-only { break-after: avoid; }
 }
+
+/* Before-and-after checks */
+.tracker h2 small { font-family: system-ui, sans-serif; font-weight: 400; font-size: 14px; }
+.tracker .golive { max-width: 320px; }
+.check-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+.check-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px 16px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.check-row.done { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.cr-nums { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.cr-status .badge { flex-basis: auto; }
+.cr-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.cr-actions .remove { margin-top: 0; }
+.progress .current-run td { background: var(--accent-soft); }
+.progress td small { display: inline; margin-left: 4px; }
+.progress td b + small { display: block; margin-left: 0; }
+.section-title { margin: 6px 0 12px; font-size: 16px; }
+.progress-grid { margin-bottom: 24px; }
+@media (max-width: 600px) {
+  .check-row { grid-template-columns: 1fr; }
+  .cr-actions { justify-content: flex-start; }
+}

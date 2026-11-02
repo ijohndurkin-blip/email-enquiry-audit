@@ -47,6 +47,31 @@ The audit function is allowed to run for up to 60 seconds (`vercel.json`). Two m
 
 Save the "before" audit file straight away. If the business later deletes or archives old emails, re-running the before period won't give the same numbers.
 
+## Tracking companies before and after the enquiry app
+
+With Supabase connected, every company you set up is saved in your Supabase. Their mailboxes, settings and every audit you run are available from any browser that has the access key.
+
+**Set-up (once):** in Vercel → Settings → Environment Variables, add the following, then redeploy:
+
+| Name | Value |
+|---|---|
+| `SUPABASE_URL` | `https://jrtrsiptbfeueosfpnrw.supabase.co` (the "Rare2 Invoice Processor" project) |
+| `SUPABASE_SECRET_KEY` | Supabase dashboard → Project Settings → API Keys → a **secret** key (`sb_secret_…`). The legacy `service_role` key also works. |
+
+The tables `audit_companies` and `audit_runs` already exist in that project. They have row-level security turned on with no public access, so only this tool's server, using the secret key, can read them; the publishable key and the invoice app's users can't. Never put the secret key in browser code. Mailbox passwords are stored only as encrypted tokens that need this deployment's `AUDIT_ACCESS_KEY` to open. Companies previously saved in a browser are moved across automatically the first time.
+
+**Using it:** pick a company under **Companies**, enter the date the enquiry app went live (or will), and the **Before-and-after checks** card lists:
+
+| Check | Period |
+|---|---|
+| Before the app | the 30 days before go-live (run it before go-live; it's the baseline) |
+| Week 1 / Week 2 | days 1–7 / 8–14 after go-live |
+| Month 1 / Month 2 / Month 3 | days 1–30 / 31–60 / 61–90 |
+
+Each check shows **Ready to run** once its period has ended, or **Due …** before then; **Run so far** runs it early. Every run is saved, so ticking/unticking, AI sorting and the AI summary are saved too. **Open** brings it back, and **Run again** replaces it. Checks are compared automatically with the saved "Before" audit. The Summary tab gets a **Progress so far** table and the Charts tab a **Progress since go-live** section, both of which print in the PDF. For time saved, use "Minutes per enquiry before the app" and "Minutes per enquiry with the app".
+
+Audits you run with your own dates are saved as "Other saved audits". Without Supabase, companies are saved in the browser as before and nothing is tracked over time.
+
 ## The results
 
 Results open in three tabs, written for business owners rather than analysts. **Print / PDF** prints all three in order, with your logo, a link to www.raresquaredlabs.co.uk and a dated footer.
@@ -136,6 +161,7 @@ AUDIT_ACCESS_KEY=test npm run dev      # http://localhost:3000
 | `lib/ai.js` | The AI prompts (sorting and plain-English summary) with JSON-schema structured output |
 | `api/summary.js` | Writes the plain-English summary from the audit totals (no email content) |
 | `public/charts.js` | The charts, in plain HTML/CSS with no library, so they print cleanly |
+| `api/store.js` / `lib/store.js` | Saved companies and audits in Supabase (server-side, secret key) |
 | `lib/secret.js` | Encrypts and decrypts saved connections (AES-256-GCM) |
 | `public/mailboxes.js` | Mailbox cards: test connection, saved connections, Sent folder choice |
 | `lib/discover.js` | Finds IMAP settings from an email address (ported from the enquiry app); certificate-name retry, STARTTLS on port 143, lockout-safe sign-in |

@@ -56,56 +56,330 @@
     try {
       const r = await api('/api/status', {});
       aiStatus = { ai: Boolean(r.ai), model: r.aiModel };
+      if (Boolean(r.store) !== remote) {
+        remote = Boolean(r.store);
+        try {
+          await loadCompanies();
+        } catch (err) {
+          remote = false;
+          await loadCompanies();
+          setStatus(`Couldn't load companies from Supabase (${esc(err.message)}). Using this browser for now.`, 'error');
+        }
+        const last = store.get('auditLastProfile');
+        if (last && companies.some((p) => p.id === last)) openProfile(last); else { profileId = null; renderProfiles(); }
+      }
     } catch { aiStatus = { ai: false, model: null }; }
     $('#aiRow').hidden = !aiStatus.ai;
     $('#aiOff').hidden = aiStatus.ai;
     if (audit) render();
   }
 
-  // --- Saved businesses -------------------------------------------------------------
+  // --- Companies (saved in Supabase when it's set up, otherwise in this browser) ---------------
 
-  function profiles() {
-    try { return JSON.parse(store.get(PROFILES_KEY) || '[]'); } catch { return []; }
+  let companies = []; // [{ id, name, goLive, settings, runs: [...] }]
+  let remote = false; // true when the server stores companies in Supabase
+  let saveChain = Promise.resolve();
+  let saveTimer = null;
+  const baselineCache = {}; // company id -> full baseline audit (with its enquiries)
+
+  const localProfiles = () => { try { return JSON.parse(store.get(PROFILES_KEY) || '[]'); } catch { return []; } };
+  const fromRow = (row) => ({ id: row.id, name: row.name, goLive: row.go_live || '', settings: row.settings || {}, runs: (row.audit_runs || []).slice().sort((a, b) => Date.parse(a.period_from) - Date.parse(b.period_from)) });
+  const current = () => companies.find((c) => c.id === profileId) || null;
+  const storeApi = (action, extra = {}) => api('/api/store', { action, ...extra }).then((r) => r.data);
+
+  async function loadCompanies() {
+    if (!remote) {
+      companies = localProfiles().map((p) => ({ id: p.id, name: p.name, goLive: (p.settings && p.settings.goLive) || '', settings: p.settings || {}, runs: [] }));
+      return;
+    }
+    // First time with Supabase: move companies saved in this browser across.
+    const local = localProfiles();
+    if (local.length && !store.get('auditMovedToSupabase')) {
+      for (const p of local) await storeApi('saveCompany', { company: { name: p.name, go_live: (p.settings && p.settings.goLive) || null, settings: p.settings || {} } });
+      store.set('auditMovedToSupabase', '1');
+      setStatus(`Moved ${local.length} saved compan${local.length === 1 ? 'y' : 'ies'} from this browser to your Supabase.`, 'ok');
+    }
+    companies = (await storeApi('listCompanies')).map(fromRow);
   }
 
   function renderProfiles() {
-    const list = profiles();
-    $('#profileSel').innerHTML = `<option value="">${list.length ? '+ New business' : 'None saved yet'}</option>${list
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const list = companies.slice().sort((a, b) => a.name.localeCompare(b.name));
+    $('#profileSel').innerHTML = `<option value="">${list.length ? '+ New company' : 'None saved yet'}</option>${list
       .map((p) => `<option value="${esc(p.id)}"${p.id === profileId ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}`;
     $('#deleteProfile').hidden = !profileId;
+    $('#storeNote').textContent = remote ? '(saved in your Supabase)' : '(saved on this browser)';
+    renderTracker();
   }
 
-  /** Save the open business (only once at least one mailbox is connected). */
+  /** Save the open company (only once at least one mailbox is connected). */
   function saveProfile() {
     if (!Mailboxes.connectedCount() && !profileId) return;
-    const list = profiles();
-    const name = form.businessName.value.trim() || (Mailboxes.firstEmail().split('@')[1] || 'Business');
-    if (!profileId) profileId = `p${Date.now().toString(36)}`;
-    const entry = { id: profileId, name, savedAt: Date.now(), settings: settingsSnapshot({ tokens: true }) };
-    const i = list.findIndex((p) => p.id === profileId);
-    if (i >= 0) list[i] = entry; else list.push(entry);
-    store.set(PROFILES_KEY, JSON.stringify(list));
-    store.set('auditLastProfile', profileId);
-    renderProfiles();
+    const name = form.businessName.value.trim() || (Mailboxes.firstEmail().split('@')[1] || 'Company');
+    const settings = settingsSnapshot({ tokens: true });
+    if (!remote) {
+      const list = localProfiles();
+      if (!profileId) profileId = `p${Date.now().toString(36)}`;
+      const entry = { id: profileId, name, savedAt: Date.now(), settings: { ...settings, goLive: (current() || {}).goLive || '' } };
+      const i = list.findIndex((p) => p.id === profileId);
+      if (i >= 0) list[i] = entry; else list.push(entry);
+      store.set(PROFILES_KEY, JSON.stringify(list));
+      store.set('auditLastProfile', profileId);
+      const c = current();
+      if (c) Object.assign(c, { name, settings: entry.settings }); else companies.push({ id: profileId, name, goLive: '', settings: entry.settings, runs: [] });
+      renderProfiles();
+      return;
+    }
+    // Supabase: saves run one after another so a new company is never created twice.
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveChain = saveChain.then(async () => {
+        const c = current();
+        const row = await storeApi('saveCompany', { company: { id: profileId || undefined, name, go_live: c ? c.goLive || null : null, settings } });
+        if (!profileId) {
+          profileId = row.id;
+          companies.push(fromRow(row));
+        } else if (c) Object.assign(c, { name: row.name, settings: row.settings });
+        store.set('auditLastProfile', profileId);
+        renderProfiles();
+      }).catch((err) => setStatus(`Couldn't save the company: ${esc(err.message)}`, 'error'));
+    }, profileId ? 600 : 0);
   }
 
   function openProfile(id) {
-    const p = profiles().find((x) => x.id === id);
+    const p = companies.find((x) => x.id === id);
     profileId = p ? p.id : null;
     store.set('auditLastProfile', profileId || '');
     applySettings(p ? p.settings : null);
     audit = null;
+    runMeta = null;
     resultsEl.hidden = true;
     setStatus(p ? `Opened ${esc(p.name)}.` : '', p ? 'ok' : '');
     renderProfiles();
+    if (p) loadBaseline(p);
   }
 
-  function deleteProfile() {
-    const p = profiles().find((x) => x.id === profileId);
-    if (!p || !confirm(`Delete the saved business "${p.name}" and its mailbox connections from this browser?`)) return;
-    store.set(PROFILES_KEY, JSON.stringify(profiles().filter((x) => x.id !== profileId)));
-    openProfile(null);
+  async function deleteProfile() {
+    const p = current();
+    if (!p) return;
+    const what = remote ? `"${p.name}", its mailbox connections and all ${p.runs.length} saved audits from your Supabase` : `"${p.name}" and its mailbox connections from this browser`;
+    if (!confirm(`Delete ${what}? This can't be undone.`)) return;
+    try {
+      if (remote) await storeApi('deleteCompany', { id: p.id });
+      else store.set(PROFILES_KEY, JSON.stringify(localProfiles().filter((x) => x.id !== p.id)));
+      companies = companies.filter((x) => x.id !== p.id);
+      openProfile(null);
+    } catch (err) {
+      setStatus(`Couldn't delete: ${esc(err.message)}`, 'error');
+    }
+  }
+
+  // --- Before-and-after checks --------------------------------------------------------------
+
+  const CHECKS = [
+    { key: 'baseline', kind: 'baseline', label: 'Before the app', note: 'the 30 days before go-live', from: -30, to: 0 },
+    { key: 'w1', kind: 'checkpoint', label: 'Week 1', note: 'first week with the app', from: 0, to: 7 },
+    { key: 'w2', kind: 'checkpoint', label: 'Week 2', note: 'second week', from: 7, to: 14 },
+    { key: 'm1', kind: 'checkpoint', label: 'Month 1', note: 'first month', from: 0, to: 30 },
+    { key: 'm2', kind: 'checkpoint', label: 'Month 2', note: 'second month', from: 30, to: 60 },
+    { key: 'm3', kind: 'checkpoint', label: 'Month 3', note: 'third month', from: 60, to: 90 },
+  ];
+  let runMeta = null; // what the next/last audit is: { kind, checkpoint, label }
+
+  const addDays = (dateStr, n) => { const [y, m, d] = dateStr.split('-').map(Number); return iso(new Date(y, m - 1, d + n)); };
+  const todayStr = () => iso(new Date());
+  const niceDate = (dateStr) => { const [y, m, d] = dateStr.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+
+  /** The dates a check covers: { from, to } as inclusive YYYY-MM-DD, plus when it's complete. */
+  function checkWindow(ch, goLive) {
+    if (!goLive) {
+      if (ch.kind !== 'baseline') return null;
+      return { from: addDays(todayStr(), -29), to: todayStr(), endsAfter: todayStr() };
+    }
+    let to = addDays(goLive, ch.to - 1);
+    let from = addDays(goLive, ch.from);
+    if (ch.kind === 'baseline' && to > todayStr()) { to = todayStr(); from = addDays(to, -29); } // go-live still to come
+    return { from, to, endsAfter: addDays(goLive, ch.to - 1) };
+  }
+
+  const runFor = (c, key) => [...c.runs].reverse().find((r) => r.checkpoint === key || (key === 'baseline' && r.kind === 'baseline'));
+
+  function runNumbers(r) {
+    const m = r.metrics || {};
+    if (m.count == null) return '';
+    const bits = [`${m.count} enquir${m.count === 1 ? 'y' : 'ies'}`];
+    if (m.medianReplyHours != null) bits.push(`typical reply ${M.duration(m.medianReplyHours)}`);
+    if (m.within1h != null) bits.push(`${Math.round(m.within1h * 100)}% within an hour`);
+    if (m.unreplied) bits.push(`${m.unreplied} no reply`);
+    return bits.join(' · ');
+  }
+
+  function renderTracker() {
+    const card = $('#trackerCard');
+    const c = current();
+    if (!c || !remote) {
+      card.hidden = true;
+      if (c && !remote) { card.hidden = false; card.innerHTML = '<h2>Before-and-after checks</h2><p class="hint">To save audits and track this company over time, connect your Supabase: add <code>SUPABASE_URL</code> and <code>SUPABASE_SECRET_KEY</code> in Vercel and redeploy.</p>'; }
+      return;
+    }
+    card.hidden = false;
+    const today = todayStr();
+    const rows = CHECKS.map((ch) => {
+      const win = checkWindow(ch, c.goLive);
+      const r = runFor(c, ch.key);
+      let status;
+      if (r) status = `<span class="badge good"><b aria-hidden="true">✓</b>Done</span>`;
+      else if (!win) status = '<span class="muted">Set the go-live date</span>';
+      else if (win.endsAfter < today || ch.kind === 'baseline') status = '<span class="badge warn"><b aria-hidden="true">!</b>Ready to run</span>';
+      else status = `<span class="muted">Due ${niceDate(addDays(win.endsAfter, 1))}</span>`;
+      const early = win && !r && ch.kind !== 'baseline' && win.endsAfter >= today && win.from <= today;
+      return `<li class="check-row${r ? ' done' : ''}">
+        <div class="cr-main">
+          <strong>${esc(ch.label)}</strong> <small class="muted">${win ? `${niceDate(win.from)} – ${niceDate(win.to)}` : esc(ch.note)}</small>
+          ${r ? `<div class="cr-nums">${esc(runNumbers(r))}</div>` : ''}
+        </div>
+        <div class="cr-status">${status}</div>
+        <div class="cr-actions">
+          ${r ? `<button type="button" class="secondary small" data-run-open="${r.id}">Open</button>` : ''}
+          ${win && (win.from <= today) ? `<button type="button" class="${r ? 'link small' : 'primary small'}" data-run-check="${ch.key}"${running ? ' disabled' : ''}>${r ? 'Run again' : early ? 'Run so far' : 'Run'}</button>` : ''}
+          ${r ? `<button type="button" class="remove" data-run-del="${r.id}" title="Delete this audit" aria-label="Delete this audit">×</button>` : ''}
+        </div>
+      </li>`;
+    }).join('');
+    const custom = c.runs.filter((r) => r.kind === 'custom');
+    card.innerHTML = `
+      <h2>Before-and-after checks <small class="muted">for ${esc(c.name)}</small></h2>
+      <p class="hint">Run the "Before" audit before the enquiry app goes live, then each check as it comes due. Every audit is saved, compared with "Before", and added to the progress charts.</p>
+      <label class="field golive">Date the enquiry app went live (or will)
+        <input type="date" id="goLive" value="${esc(c.goLive || '')}">
+      </label>
+      <ol class="check-list">${rows}</ol>
+      ${custom.length ? `<h3>Other saved audits</h3><ol class="check-list">${custom.map((r) => `<li class="check-row done"><div class="cr-main"><strong>${esc(r.label)}</strong> <small class="muted">${esc(new Date(r.period_from).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))} – ${esc(new Date(Date.parse(r.period_to) - 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</small><div class="cr-nums">${esc(runNumbers(r))}</div></div><div class="cr-status"></div><div class="cr-actions"><button type="button" class="secondary small" data-run-open="${r.id}">Open</button><button type="button" class="remove" data-run-del="${r.id}" title="Delete this audit" aria-label="Delete this audit">×</button></div></li>`).join('')}</ol>` : ''}
+    `;
+    $('#goLive').addEventListener('change', (e) => {
+      c.goLive = e.target.value;
+      saveProfile();
+      renderTracker();
+    });
+    card.querySelectorAll('[data-run-check]').forEach((b) => b.addEventListener('click', () => startCheck(b.dataset.runCheck)));
+    card.querySelectorAll('[data-run-open]').forEach((b) => b.addEventListener('click', () => openRun(b.dataset.runOpen)));
+    card.querySelectorAll('[data-run-del]').forEach((b) => b.addEventListener('click', () => deleteRun(b.dataset.runDel)));
+  }
+
+  function startCheck(key) {
+    if (running) return;
+    const c = current();
+    const ch = CHECKS.find((x) => x.key === key);
+    const win = checkWindow(ch, c.goLive);
+    form.aFrom.value = win.from;
+    form.aTo.value = win.to > todayStr() ? todayStr() : win.to;
+    form.compare.checked = false;
+    syncCompare();
+    nextRunMeta = { kind: ch.kind, checkpoint: ch.key, label: ch.label };
+    form.requestSubmit();
+  }
+
+  async function openRun(id) {
+    setStatus('<span class="spinner"></span> Opening the saved audit…');
+    try {
+      const row = await storeApi('getRun', { id });
+      const from = new Date(row.period_from);
+      const to = new Date(Date.parse(row.period_to) - 1);
+      form.aFrom.value = iso(from);
+      form.aTo.value = iso(to);
+      form.compare.checked = false;
+      syncCompare();
+      runMeta = { kind: row.kind, checkpoint: row.checkpoint, label: row.label };
+      audit = { result: row.result || { enquiries: [], mailboxes: [], stats: {} }, summary: row.summary || null, runId: row.id, meta: runMeta, withText: false };
+      audit.savedSig = runSignature();
+      view = 'summary';
+      setStatus(`Opened the "${esc(row.label)}" audit, saved ${esc(new Date(row.updated_at || row.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}.`, 'ok');
+      render();
+      resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      setStatus(`Couldn't open it: ${esc(err.message)}`, 'error');
+    }
+  }
+
+  async function deleteRun(id) {
+    const c = current();
+    const r = c && c.runs.find((x) => x.id === id);
+    if (!r || !confirm(`Delete the saved "${r.label}" audit? This can't be undone.`)) return;
+    try {
+      await storeApi('deleteRun', { id });
+      c.runs = c.runs.filter((x) => x.id !== id);
+      if (r.kind === 'baseline') delete baselineCache[c.id];
+      if (audit && audit.runId === id) audit.runId = null;
+      renderTracker();
+      if (audit) render();
+    } catch (err) {
+      setStatus(`Couldn't delete: ${esc(err.message)}`, 'error');
+    }
+  }
+
+  /** Load the company's "Before" audit (with its enquiries) so later checks can be compared with it. */
+  async function loadBaseline(c) {
+    const b = c && remote ? runFor(c, 'baseline') : null;
+    if (!b || (baselineCache[c.id] && baselineCache[c.id].id === b.id)) return;
+    try {
+      baselineCache[c.id] = await storeApi('getRun', { id: b.id });
+      if (audit) render();
+    } catch { /* comparisons just won't show */ }
+  }
+
+  // --- Saving each audit -------------------------------------------------------------------
+
+  const runSignature = () => (audit ? JSON.stringify([audit.result.enquiries.filter((e) => e.include).map((e) => e.id), audit.summary && audit.summary.at, form.minsA.value, form.minsB.value]) : '');
+  let runSaveTimer = null;
+
+  /** Save (or update) the audit on screen for the open company. */
+  function scheduleRunSave(immediate = false) {
+    const c = current();
+    if (!remote || !c || !audit || !audit.meta || form.compare.checked) return;
+    const sig = runSignature();
+    if (!immediate && sig === audit.savedSig) return;
+    clearTimeout(runSaveTimer);
+    runSaveTimer = setTimeout(() => {
+      saveChain = saveChain.then(async () => {
+        const ps = periods();
+        const p = ps[ps.length - 1];
+        const stat = periodStats().find((s) => s.p === p) || periodStats().slice(-1)[0];
+        const existing = audit.runId || (audit.meta.checkpoint && (runFor(c, audit.meta.checkpoint) || {}).id) || undefined;
+        const result = { ...audit.result, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e) };
+        const row = await storeApi('saveRun', {
+          run: {
+            id: existing, company_id: c.id, kind: audit.meta.kind, checkpoint: audit.meta.checkpoint || null, label: audit.meta.label,
+            period_from: p.from, period_to: p.to, minutes_per_enquiry: p.mins, metrics: stat.m, result, summary: audit.summary || null,
+          },
+        });
+        audit.runId = row.id;
+        audit.savedSig = runSignature();
+        c.runs = [...c.runs.filter((x) => x.id !== row.id), row].sort((a, b) => Date.parse(a.period_from) - Date.parse(b.period_from));
+        if (row.kind === 'baseline') { delete baselineCache[c.id]; loadBaseline(c); }
+        renderTracker();
+        aiMessage = aiMessage || '';
+        const note = resultsEl.querySelector('.saved-note');
+        if (note) note.textContent = `Saved to ${c.name} as "${row.label}".`;
+      }).catch((err) => setStatus(`The audit ran but couldn't be saved: ${esc(err.message)}`, 'error'));
+    }, immediate ? 0 : 1500);
+  }
+
+  /** "Before" stats for a check, from the saved baseline audit. */
+  function baselineStat() {
+    const c = current();
+    if (!c || !audit || !audit.meta || audit.meta.kind === 'baseline' || form.compare.checked) return null;
+    const b = baselineCache[c.id];
+    if (!b || !b.result) return null;
+    const w = work();
+    const p = { label: 'Before', from: Date.parse(b.period_from), to: Date.parse(b.period_to), mins: b.minutes_per_enquiry };
+    const list = (b.result.enquiries || []).filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
+    return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }), saved: true };
+  }
+
+  /** Saved audits for the open company, in date order, for the progress charts. */
+  function progressRuns() {
+    const c = current();
+    if (!c || !remote) return [];
+    return c.runs.filter((r) => r.kind !== 'custom' && r.metrics && r.metrics.count != null);
   }
 
   // --- Setup form -------------------------------------------------------------
@@ -140,8 +414,9 @@
     form.addEventListener('submit', run);
     $('#openFile').addEventListener('change', openSaved);
 
+    loadCompanies();
     const last = store.get('auditLastProfile');
-    if (last && profiles().some((p) => p.id === last)) openProfile(last);
+    if (last && companies.some((p) => p.id === last)) openProfile(last);
     else { renderProfiles(); syncCompare(); }
     if (!form.accessKey.value) form.accessKey.focus();
     else checkStatus();
@@ -177,7 +452,9 @@
       const to = Math.min(dayStart(t, tz) + DAY, Date.now());
       if (to > from) list.push({ label, from, to, mins: Number(mins) || null });
     };
-    mk('Before', form.aFrom.value, form.aTo.value, form.minsA.value);
+    const meta = (audit && audit.meta) || runMeta;
+    const label = meta && meta.kind !== 'custom' ? meta.label : (form.compare.checked ? 'Before' : (meta ? meta.label : 'This period'));
+    mk(label, form.aFrom.value, form.aTo.value, meta && meta.kind === 'checkpoint' ? form.minsB.value : form.minsA.value);
     if (form.compare.checked) mk('After', form.bFrom.value, form.bTo.value, form.minsB.value);
     return list;
   }
@@ -187,8 +464,14 @@
     statusEl.innerHTML = html;
   }
 
+  let nextRunMeta = null;
+  let running = false;
+
   async function run(ev) {
     ev.preventDefault();
+    if (running) return;
+    const meta = nextRunMeta || { kind: 'custom', checkpoint: null, label: form.compare.checked ? 'Comparison' : 'Custom audit' };
+    nextRunMeta = null;
     const ps = periods();
     if (!ps.length) return setStatus('Choose the dates to audit.', 'error');
     const pending = Mailboxes.pending();
@@ -197,6 +480,8 @@
     if (!mailboxes.length) return setStatus('Connect at least one mailbox first.', 'error');
     const btn = $('#runBtn');
     btn.disabled = true;
+    running = true;
+    renderTracker();
     setStatus('<span class="spinner"></span> Reading the mailboxes. This usually takes 10–40 seconds…');
     try {
       const data = await api('/api/audit', {
@@ -207,7 +492,9 @@
         ignoreSenders: form.ignoreSenders.value,
         withText: useAi(),
       });
-      audit = { result: data, withText: useAi() };
+      runMeta = meta;
+      audit = { result: data, withText: useAi(), meta };
+      if (remote && current() && !form.compare.checked) scheduleRunSave(true);
       tab = 'counted';
       aiMessage = '';
       setStatus('');
@@ -218,6 +505,8 @@
       setStatus(`<strong>${esc(err.message)}</strong>${mailboxErrors(err.data && err.data.mailboxes)}`, 'error');
     } finally {
       btn.disabled = false;
+      running = false;
+      renderTracker();
     }
   }
 
@@ -409,10 +698,12 @@
   function periodStats() {
     const r = audit.result;
     const w = work();
-    return periods().map((p) => {
+    const own = periods().map((p) => {
       const list = r.enquiries.filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
       return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }) };
     });
+    const base = baselineStat();
+    return base && own.length === 1 ? [base, ...own] : own;
   }
 
   function render() {
@@ -441,6 +732,8 @@
         </div>
       </div>
       ${aiMessage ? `<p class="ai-status no-print">${aiMessage}</p>` : ''}
+      ${remote && current() && audit.meta ? `<p class="saved-note hint no-print">${audit.runId ? `Saved to ${esc(current().name)} as "${esc(audit.meta.label)}".` : 'Saving…'}</p>` : ''}
+      ${stats.length > 1 && stats[0].saved ? `<p class="hint">Compared with the saved "Before" audit (${esc(range(stats[0].p))}).</p>` : ''}
       <nav class="views no-print" role="tablist" aria-label="Results">
         ${[['summary', 'Summary'], ['charts', 'Charts'], ['list', `Enquiries (${counted})`]].map(([k, label]) => `<button type="button" role="tab" aria-selected="${view === k}" data-view="${k}" class="${view === k ? 'on' : ''}">${label}</button>`).join('')}
       </nav>
@@ -449,10 +742,12 @@
         ${glance(stats)}
         ${summaryCard(stats)}
         ${stats.length === 1 ? tiles(stats[0].m) : compareTable(stats)}
+        ${progressTable()}
         <div class="card story"><h3>For the case study</h3>${stats.map((s) => `<p>${story(s, name, range)}</p>`).join('')}${savingLine(stats)}</div>
       </section>
       <section class="panel${view === 'charts' ? '' : ' screen-hidden'}" data-panel="charts">
         <h2 class="print-only">Charts</h2>
+        ${progressCharts()}
         ${chartsHtml(stats, w)}
       </section>
       <section class="panel${view === 'list' ? '' : ' screen-hidden'}" data-panel="list">
@@ -476,6 +771,7 @@
       if (b.dataset.never === 'remove') { removeNever(b.dataset.email); return; }
       neverCount(b.dataset.never);
     }));
+    scheduleRunSave();
     resultsEl.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
     resultsEl.querySelectorAll('input[data-id]').forEach((cb) => cb.addEventListener('change', () => {
       const e = r.enquiries.find((x) => x.id === Number(cb.dataset.id));
@@ -539,6 +835,8 @@
     const busiest = (arr, names) => { const max = Math.max(...arr); return max ? names[arr.indexOf(max)] : null; };
     return {
       openingHours: `${w.workStart}–${w.workEnd}, ${w.workDays.map((d) => DAYS[d]).join(' ')}`,
+      goLiveDate: current() && current().goLive ? current().goLive : null,
+      savedChecksSoFar: progressRuns().map((r) => ({ check: r.label, enquiries: r.metrics.count, typicalReplyHoursClock: r1(r.metrics.medianReplyHours), repliedWithin1HourPct: pc(r.metrics.within1h), noEmailReplyFound: r.metrics.unreplied })),
       periods: stats.map(({ p, m }) => ({
         label: p.label, days: Math.round(m.days), enquiries: m.count, enquiriesPerMonth: r1(m.perMonth),
         typicalReplyHoursClock: r1(m.medianReplyHours), typicalReplyHoursOpeningHours: r1(m.medianWorkingReplyHours),
@@ -591,6 +889,56 @@
       ${stale ? `<p class="hint no-print">The numbers have changed since this was written. ${button('Update summary')}</p>` : `<p class="no-print">${button('Rewrite')}</p>`}
       ${audit.summaryError ? `<p class="bad no-print">${esc(audit.summaryError)}</p>` : ''}
     </div>`;
+  }
+
+  // --- Progress over time (saved checks) ---------------------------------------------------
+
+  function progressTable() {
+    const runs = progressRuns();
+    if (runs.length < 2) return '';
+    const cur = audit && audit.runId;
+    const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+    return `<div class="card progress">
+      <h3>Progress so far</h3>
+      <p class="hint">Each saved check for this company, oldest first. "Before" is the period before the enquiry app.</p>
+      <div class="scroll"><table class="list">
+        <thead><tr><th>Check</th><th>Dates</th><th>Enquiries a month</th><th>Typical reply</th><th>Replied within an hour</th><th>No reply found</th><th>Time spent a month</th></tr></thead>
+        <tbody>${runs.map((r) => {
+          const m = r.metrics;
+          const d = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+          return `<tr${r.id === cur ? ' class="current-run"' : ''}>
+            <td><b>${esc(r.label)}</b>${r.id === cur ? '<small>this audit</small>' : ''}</td>
+            <td>${d(r.period_from)} – ${d(Date.parse(r.period_to) - 1)}</td>
+            <td>${num(m.perMonth)}</td>
+            <td>${M.duration(m.medianReplyHours)}</td>
+            <td>${pct(m.within1h)}</td>
+            <td>${m.unreplied ?? '–'}${m.replyRate != null ? ` <small>${pct(1 - m.replyRate)}</small>` : ''}</td>
+            <td>${m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  function progressCharts() {
+    const runs = progressRuns();
+    if (runs.length < 2) return '';
+    const C = EnquiryCharts;
+    const legend = [{ name: 'Before the app', cls: 'before' }, { name: 'With the app', cls: 'after' }];
+    const rows = (fn) => runs.map((r) => ({ label: r.label, short: r.label.replace('Before the app', 'Before'), values: [fn(r.metrics)], cls: r.kind === 'baseline' ? 'before' : 'after' }));
+    const first = runs[0].metrics;
+    const last = runs[runs.length - 1].metrics;
+    const hrs = (h) => M.duration(h);
+    const pc = (x) => `${Math.round(x)}%`;
+    const charts = [
+      C.vbar({ title: 'Typical reply time', takeaway: first.medianReplyHours != null && last.medianReplyHours != null ? `From <b>${hrs(first.medianReplyHours)}</b> to <b>${hrs(last.medianReplyHours)}</b>. Lower is better.` : 'Lower is better.', rows: rows((m) => m.medianReplyHours ?? 0), series: [{ name: 'Typical reply', cls: 'after' }], legendSeries: legend, unit: '', format: hrs }),
+      C.vbar({ title: 'Replied within an hour', takeaway: `From <b>${pc((first.within1h || 0) * 100)}</b> to <b>${pc((last.within1h || 0) * 100)}</b>. Higher is better.`, rows: rows((m) => Math.round((m.within1h || 0) * 100)), series: [{ name: 'Within an hour', cls: 'after' }], legendSeries: legend, unit: '', format: pc }),
+      C.vbar({ title: 'Enquiries with no reply found', takeaway: `From <b>${pc(first.replyRate != null ? (1 - first.replyRate) * 100 : 0)}</b> to <b>${pc(last.replyRate != null ? (1 - last.replyRate) * 100 : 0)}</b> of enquiries. Lower is better.`, rows: rows((m) => (m.replyRate != null ? Math.round((1 - m.replyRate) * 100) : 0)), series: [{ name: 'No reply', cls: 'after' }], legendSeries: legend, unit: '', format: pc }),
+    ];
+    if (runs.some((r) => r.metrics.hoursPerMonth != null)) {
+      charts.push(C.vbar({ title: 'Time spent on enquiries a month', takeaway: 'Based on the minutes per enquiry you entered. Lower is better.', rows: rows((m) => Math.round((m.hoursPerMonth || 0) * 10) / 10), series: [{ name: 'Hours', cls: 'after' }], legendSeries: legend, unit: 'hours', format: (v) => `${num(v, 1)} hrs` }));
+    }
+    return `<h3 class="section-title">Progress since go-live</h3><div class="charts-grid progress-grid">${charts.join('')}</div><h3 class="section-title">This audit</h3>`;
   }
 
   // --- Charts tab --------------------------------------------------------------------------
