@@ -49,6 +49,16 @@
         <p class="hint">Add each address enquiries arrive at. Enter the email and password, then press <b>Test connection</b>. Once it's connected, the company is saved for next time.</p>
         <div id="mailboxes"></div>
         <button type="button" class="link" id="addMailbox">+ Add another mailbox</button>
+        <details class="more customers">
+          <summary>Existing customers <small id="customerCount">None yet</small></summary>
+          <p class="hint">Add the business's existing customers so the report can tell new enquiries from repeat customers. Paste rows (from Excel, Google Sheets or an email list) or import a CSV. Each row just needs an email address; a name is optional. Customers you mark as <b>Won</b> are added automatically.</p>
+          <textarea id="customerPaste" rows="3" placeholder="Jo Bloggs, jo@gmail.com&#10;Acme Ltd, accounts@acme.co.uk"></textarea>
+          <div class="actions">
+            <button type="button" class="secondary small" id="addCustomers">Add these</button>
+            <label class="button secondary small">Import CSV<input type="file" id="customerFile" accept=".csv,text/csv,.txt" hidden></label>
+            <button type="button" class="link small" id="clearCustomers" hidden>Clear the list</button>
+          </div>
+        </details>
         <details class="more">
           <summary>More options</summary>
           <label class="field">Other addresses the business replies from <small>(comma separated, e.g. a personal Gmail)</small>
@@ -111,6 +121,15 @@
     <section id="results" hidden></section>
   </main>
 
+
+  <dialog id="threadDialog" class="thread-dialog" aria-labelledby="threadTitle">
+    <div class="thread-head">
+      <h2 id="threadTitle">Conversation</h2>
+      <button type="button" class="remove" id="threadClose" aria-label="Close">×</button>
+    </div>
+    <p class="hint">Shown live from the mailbox, with quoted earlier messages trimmed. Nothing here is saved.</p>
+    <div id="threadBody"></div>
+  </dialog>
 
   <script src="metrics.js"></script>
   <script src="mailboxes.js"></script>

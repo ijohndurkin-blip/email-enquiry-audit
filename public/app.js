@@ -350,7 +350,7 @@
 
   // --- Saving each audit -------------------------------------------------------------------
 
-  const runSignature = () => (audit ? JSON.stringify([audit.result.enquiries.filter((e) => e.include).map((e) => e.id), audit.summary && audit.summary.at, form.minsA.value, form.minsB.value]) : '');
+  const runSignature = () => (audit ? JSON.stringify([audit.result.enquiries.filter((e) => e.include).map((e) => e.id), audit.result.enquiries.filter((e) => e.outcome).map((e) => `${e.id}:${e.outcome}`), audit.summary && audit.summary.at, form.minsA.value, form.minsB.value]) : '');
   let runSaveTimer = null;
 
   /** Save (or update) the audit on screen for the open company. */
@@ -391,7 +391,9 @@
     if (!c || !audit || !audit.meta || audit.meta.kind === 'baseline' || form.compare.checked) return null;
     const b = baselineCache[c.id];
     if (!b || !b.result) return null;
-    const w = work();
+    const w = { ...work(), asOf: Date.parse(b.result.generatedAt) || Date.parse(b.updated_at) || Date.now() };
+    const known = customerSet();
+    (b.result.enquiries || []).forEach((e) => { e.existing = Boolean(e.customerEmail) && known.has(e.customerEmail.toLowerCase()); });
     const p = { label: 'Before', from: Date.parse(b.period_from), to: Date.parse(b.period_to), mins: b.minutes_per_enquiry };
     const list = (b.result.enquiries || []).filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
     return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }), saved: true };
@@ -434,6 +436,26 @@
     }));
     $('#workDays').addEventListener('change', () => { if (audit) render(); if (profileId) saveProfile(); });
     form.addEventListener('submit', run);
+    $('#addCustomers').addEventListener('click', () => {
+      const list = parseCustomers($('#customerPaste').value);
+      if (!list.length) return setStatus('No email addresses found in what you pasted.', 'error');
+      addCustomers(list);
+      $('#customerPaste').value = '';
+    });
+    $('#customerFile').addEventListener('change', async (ev) => {
+      const file = ev.target.files[0];
+      ev.target.value = '';
+      if (file) addCustomers(parseCustomers(await file.text()));
+    });
+    $('#clearCustomers').addEventListener('click', () => {
+      if (!confirm(`Remove all ${customers.length} customers from this company's list?`)) return;
+      customers = [];
+      renderCustomers();
+      saveProfile();
+      if (audit) render();
+    });
+    $('#threadClose').addEventListener('click', () => $('#threadDialog').close());
+    renderCustomers();
     $('#openFile').addEventListener('change', openSaved);
 
     loadCompanies();
@@ -632,6 +654,7 @@
       minsA: form.minsA.value, minsB: form.minsB.value,
       mailboxes: Mailboxes.snapshot({ tokens }), // passwords are never saved
       otherAddresses: form.otherAddresses.value, ignoreSenders: form.ignoreSenders.value,
+      customers,
     };
   }
 
@@ -640,6 +663,8 @@
       ['businessName', 'about', 'minsA', 'minsB', 'bFrom', 'bTo', 'otherAddresses', 'ignoreSenders'].forEach((k) => { form[k].value = ''; });
       form.compare.checked = false;
       form.useAi.checked = false;
+      customers = [];
+      renderCustomers();
       defaultDates();
       Mailboxes.load([]);
       syncCompare();
@@ -648,6 +673,7 @@
     ['businessName', 'about', 'aFrom', 'aTo', 'bFrom', 'bTo', 'minsA', 'minsB', 'workStart', 'workEnd', 'otherAddresses', 'ignoreSenders'].forEach((k) => { if (s[k] != null) form[k].value = s[k]; });
     if (s.tz) form.tz.value = s.tz;
     form.useAi.checked = Boolean(s.useAi);
+    if (Array.isArray(s.customers)) { customers = s.customers.filter((c) => c && c.email); renderCustomers(); }
     form.compare.checked = Boolean(s.compare);
     if (Array.isArray(s.workDays)) $('#workDays').querySelectorAll('input').forEach((i) => { i.checked = s.workDays.includes(Number(i.value)); });
     if (Array.isArray(s.mailboxes)) Mailboxes.load(s.mailboxes);
@@ -696,7 +722,7 @@
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
-    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'AI check', 'Reason not counted / note']];
+    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'AI check', 'Reason not counted / note']];
     for (const e of audit.result.enquiries) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
       const w = work();
@@ -705,7 +731,8 @@
         e.viaForm ? 'yes' : '', fmt(e.firstReplyAt),
         e.firstReplyAt ? ((e.firstReplyAt - e.receivedAt) / 3600000).toFixed(2) : '',
         e.firstReplyAt ? (M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000).toFixed(2) : '',
-        e.inboundCount, e.outboundCount, e.ai ? `${e.ai.label}: ${e.ai.reason}` : '', e.reason || e.note || '',
+        e.inboundCount, e.outboundCount, M.STATE_LABELS[M.conversationState(e, Date.parse(audit.result.generatedAt) || Date.now())] || '', e.outcome || '', e.existing ? 'yes' : '',
+        e.ai ? `${e.ai.label}: ${e.ai.reason}` : '', e.reason || e.note || '',
       ]);
     }
     const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -719,7 +746,9 @@
 
   function periodStats() {
     const r = audit.result;
-    const w = work();
+    const w = { ...work(), asOf: Date.parse(r.generatedAt) || Date.now() };
+    const known = customerSet();
+    for (const e of r.enquiries) e.existing = Boolean(e.customerEmail) && known.has(e.customerEmail.toLowerCase());
     const own = periods().map((p) => {
       const list = r.enquiries.filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
       return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }) };
@@ -793,6 +822,16 @@
       if (b.dataset.never === 'remove') { removeNever(b.dataset.email); return; }
       neverCount(b.dataset.never);
     }));
+    resultsEl.querySelectorAll('[data-view-thread]').forEach((b) => b.addEventListener('click', () => viewThread(Number(b.dataset.viewThread))));
+    resultsEl.querySelectorAll('[data-outcome]').forEach((sel) => sel.addEventListener('change', () => {
+      const e = r.enquiries.find((x) => x.id === Number(sel.dataset.outcome));
+      e.outcome = sel.value || undefined;
+      if (e.outcome === 'won' && e.customerEmail && !customerSet().has(e.customerEmail.toLowerCase())) {
+        addCustomers([{ email: e.customerEmail.toLowerCase(), name: e.customerName || '' }], { quiet: true });
+        aiMessage = `Marked as won and added <b>${esc(e.customerName || e.customerEmail)}</b> to this company's customer list.`;
+      }
+      render();
+    }));
     scheduleRunSave();
     resultsEl.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
     resultsEl.querySelectorAll('input[data-id]').forEach((cb) => cb.addEventListener('change', () => {
@@ -826,6 +865,19 @@
       const share = m.unreplied / (m.replied + m.unreplied);
       const s = m.unreplied === 0 ? 'good' : share <= 0.1 ? 'warn' : 'bad';
       out.push({ s, title: 'Enquiries without a reply', text: m.unreplied === 0 ? 'Every enquiry got an email reply.' : `${m.unreplied} of ${m.replied + m.unreplied} enquiries got no email reply that we could see. Some may have been phoned back, but each one could be a lost job.` });
+    }
+    if (m.wentQuiet) {
+      const s = m.notChased === 0 ? 'good' : m.notChased / m.wentQuiet <= 0.25 ? 'warn' : 'bad';
+      out.push({ s, title: 'Following up when customers go quiet', text: m.notChased === 0 ? `All ${m.wentQuiet} customers who went quiet after a reply were followed up. Well done.` : `${m.notChased} of ${m.wentQuiet} customers went quiet after the business replied and were never chased. A friendly follow-up a few days later often wins the job.` });
+    }
+    if (m.customerWaiting) {
+      out.push({ s: 'bad', title: 'Customers waiting on you', text: `${m.customerWaiting} customer${m.customerWaiting === 1 ? ' has' : 's have'} emailed again and not had an answer to their latest email.` });
+    }
+    if (m.won + m.lost) {
+      out.push({ s: 'info', title: 'Enquiries that became work', text: `Of the ${m.won + m.lost} enquiries marked so far, ${m.won} became customers (${pct(m.winRate)}).` });
+    }
+    if (m.existingCustomers) {
+      out.push({ s: 'info', title: 'Existing customers', text: `${m.existingCustomers} of ${m.count} enquiries came from people already on the customer list; ${m.count - m.existingCustomers} were new.` });
     }
     if (m.count) {
       const share = m.outOfHours / m.count;
@@ -867,6 +919,8 @@
         arrivedOutOfHours: m.outOfHours, emailsPerEnquiry: r1(m.avgEmails), viaWebsiteForm: m.viaForm,
         busiestDay: busiest(m.byWeekday, DAYS), busiestHour: busiest(m.byHour, m.byHour.map((_, h) => `${h}:00`)),
         minutesPerEnquiry: m.minutesPerEnquiry, hoursPerMonthOnEnquiries: r1(m.hoursPerMonth),
+        customersWentQuietAfterReply: m.wentQuiet, quietCustomersChased: m.chased, quietCustomersNotChased: m.notChased,
+        customersWaitingOnReply: m.customerWaiting, markedWon: m.won, markedLost: m.lost, fromExistingCustomers: m.existingCustomers,
       })),
     };
   }
@@ -1036,6 +1090,9 @@
     ['Replied within 1 hour', (m) => pct(m.within1h), (m) => `within 4 hrs: ${pct(m.within4h)}`],
     ['Replied within 24 hours', (m) => pct(m.within24h), (m) => `slowest: ${M.duration(m.slowest)}`],
     ['No reply found', (m) => num(m.unreplied), (m) => `${pct(m.replyRate == null ? null : 1 - m.replyRate)} of enquiries${m.unmatchable ? ` · ${m.unmatchable} form emails can't be checked` : ''}`],
+    ['Went quiet, not chased', (m) => num(m.notChased), (m) => (m.wentQuiet ? `${m.chased} of ${m.wentQuiet} quiet customers were chased` : 'no customers went quiet')],
+    ['Waiting on a reply', (m) => num(m.customerWaiting), () => 'customer\'s latest email unanswered'],
+    ['Won (marked)', (m) => num(m.won), (m) => (m.won + m.lost ? `${pct(m.winRate)} of those marked won or lost` : 'mark outcomes in the Enquiries tab')],
     ['Arrived out of hours', (m) => num(m.outOfHours), (m) => (m.count ? `${pct(m.outOfHours / m.count)} of enquiries` : '')],
     ['Emails per enquiry', (m) => num(m.avgEmails, 1), () => 'both directions'],
     ['From the website form', (m) => num(m.viaForm), (m) => (m.count ? `${pct(m.viaForm / m.count)} of enquiries` : '')],
@@ -1106,46 +1163,125 @@
     const notCounted = list.filter((e) => !e.include).sort((a, b) => (a.reason || '').localeCompare(b.reason || '') || a.receivedAt - b.receivedAt);
     const rows = tab === 'counted' ? counted : notCounted;
     const fmt = (t) => new Date(t).toLocaleString('en-GB', { timeZone: w.tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const asOf = Date.parse(r.generatedAt) || Date.now();
     const reasons = {};
     notCounted.forEach((e) => {
       const key = e.ai && !e.ai.enquiry && /^AI:/.test(e.reason || '') ? `AI: ${e.ai.label}` : (e.reason || 'Unticked by you');
       reasons[key] = (reasons[key] || 0) + 1;
     });
+    const canView = Mailboxes.connectedCount() > 0;
     return `<div class="card tablecard">
       <div class="tabs no-print">
         <button type="button" data-tab="counted" class="${tab === 'counted' ? 'on' : ''}">Counted (${counted.length})</button>
         <button type="button" data-tab="not" class="${tab === 'not' ? 'on' : ''}">Not counted (${notCounted.length})</button>
       </div>
-      <p class="hint no-print">${tab === 'counted' ? 'Untick anything that isn\'t a real enquiry; the numbers update straight away.' : `Tick anything that is a real enquiry. ${Object.entries(reasons).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ')}`}</p>
+      <p class="hint no-print">${tab === 'counted' ? 'Untick anything that isn\'t a real enquiry. Mark the outcome when you know it: <b>Won</b> adds them to the customer list. The numbers update straight away.' : `Tick anything that is a real enquiry. ${Object.entries(reasons).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ')}`}</p>
       <div class="scroll"><table class="list">
-        <thead><tr><th class="no-print">Count</th><th>Received</th><th>From</th><th>Subject</th><th>First reply</th><th>Emails</th><th>${tab === 'counted' ? 'Note' : 'Why not counted'}</th><th class="no-print"></th></tr></thead>
+        <thead><tr><th class="no-print">Count</th><th>Received</th><th>From</th><th>Subject</th><th>First reply</th><th>${tab === 'counted' ? 'Where it stands' : 'Why not counted'}</th>${tab === 'counted' ? '<th>Outcome</th>' : ''}<th class="no-print"></th></tr></thead>
         <tbody>${rows.map((e) => {
           const h = e.firstReplyAt ? (e.firstReplyAt - e.receivedAt) / 3600000 : null;
           const reply = !e.replyMatchable ? '<span class="muted">can\'t tell</span>' : (h == null ? '<span class="bad">none found</span>' : `${M.duration(h)}<small>${M.duration(M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000)} working</small>`);
           const period = ps.length > 1 ? (ps.find((p) => e.receivedAt >= p.from && e.receivedAt < p.to) || {}).label : '';
+          const state = M.conversationState(e, asOf);
+          const stateCls = { waiting: 'bad', 'quiet-not-chased': 'warn-text', 'no-reply': 'bad' }[state] || '';
+          const emails = e.inboundCount + e.outboundCount;
+          const note = e.ai ? `AI: ${e.ai.reason}` : e.note;
           return `<tr>
             <td class="no-print"><input type="checkbox" data-id="${e.id}"${e.include ? ' checked' : ''} aria-label="Count this enquiry"></td>
             <td>${fmt(e.receivedAt)}${period ? `<small>${esc(period)}</small>` : ''}</td>
-            <td>${esc(e.customerName || e.customerEmail || 'Website form')}<small>${esc(e.customerName ? e.customerEmail : '')}${e.viaForm ? ' · website form' : ''}${r.mailboxes.length > 1 ? ` · to ${esc(e.mailboxes.map((m) => m.split('@')[0]).join(', '))}` : ''}</small></td>
-            <td class="subject">${esc(e.subject)}</td>
+            <td>${esc(e.customerName || e.customerEmail || 'Website form')}${e.existing ? ' <span class="tag">Existing customer</span>' : ''}<small>${esc(e.customerName ? e.customerEmail : '')}${e.viaForm ? ' · website form' : ''}${r.mailboxes.length > 1 ? ` · to ${esc(e.mailboxes.map((m) => m.split('@')[0]).join(', '))}` : ''}</small></td>
+            <td class="subject">${esc(e.subject)}${tab === 'counted' && note ? `<small class="muted">${esc(note)}</small>` : ''}</td>
             <td>${reply}</td>
-            <td>${e.inboundCount + e.outboundCount}</td>
-            <td class="muted">${esc(tab === 'counted' ? (e.ai ? `AI: ${e.ai.reason}` : e.note) : (e.reason || 'Unticked by you'))}</td>
-            <td class="no-print actions-cell">${neverButtons(e)}</td>
+            ${tab === 'counted'
+              ? `<td><span class="${stateCls}">${esc(M.STATE_LABELS[state] || '')}</span><small>${emails} email${emails === 1 ? '' : 's'}</small></td>
+                 <td><select class="outcome" data-outcome="${e.id}" aria-label="Outcome">
+                   <option value="">Not known</option><option value="won"${e.outcome === 'won' ? ' selected' : ''}>Won</option><option value="lost"${e.outcome === 'lost' ? ' selected' : ''}>Lost</option>
+                 </select><span class="print-only">${e.outcome === 'won' ? 'Won' : e.outcome === 'lost' ? 'Lost' : ''}</span></td>`
+              : `<td class="muted">${esc(e.reason || 'Unticked by you')}</td>`}
+            <td class="no-print actions-cell">
+              ${canView && (e.msgs || []).length ? `<button type="button" class="secondary small" data-view-thread="${e.id}">View</button>` : ''}
+              ${neverButtons(e)}
+            </td>
           </tr>`;
-        }).join('') || '<tr><td colspan="8" class="muted">Nothing here.</td></tr>'}</tbody>
+        }).join('') || `<tr><td colspan="8" class="muted">Nothing here.</td></tr>`}</tbody>
       </table></div>
     </div>`;
   }
+
+  // --- Reading one conversation (live from the mailbox, never stored) ---------------------
+
+  async function viewThread(id) {
+    const e = audit.result.enquiries.find((x) => x.id === id);
+    if (!e) return;
+    const dlg = $('#threadDialog');
+    const body = $('#threadBody');
+    $('#threadTitle').textContent = `${e.customerName || e.customerEmail || 'Website form'}: ${e.subject}`;
+    body.innerHTML = '<p><span class="spinner"></span> Opening the emails from the mailbox…</p>';
+    if (!dlg.open) dlg.showModal();
+    try {
+      const r = await api('/api/thread', { mailboxes: Mailboxes.forAudit().filter((m) => m.token), refs: e.msgs || [] });
+      const w = work();
+      body.innerHTML = `${(r.problems || []).map((p) => `<p class="bad">${esc(p)}</p>`).join('')}
+        ${r.messages.map((m) => `<article class="mail ${m.direction}">
+          <header><span class="who">${m.direction === 'out' ? 'Business' : 'Customer'}</span>
+            <span class="muted">${m.date ? esc(new Date(m.date).toLocaleString('en-GB', { timeZone: w.tz, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : ''}</span></header>
+          ${m.missing ? '<p class="muted">This email couldn\'t be found any more (it may have been moved or deleted).</p>' : `
+            <p class="mail-meta"><b>${esc(m.from)}</b> → ${esc(m.to)}<br>${esc(m.subject)}</p>
+            <div class="mail-text">${esc(m.text || '(no text)')}</div>
+            ${m.attachments && m.attachments.length ? `<p class="muted">Attachments: ${esc(m.attachments.join(', '))}</p>` : ''}`}
+        </article>`).join('')}`;
+    } catch (err) {
+      body.innerHTML = `<p class="bad">${esc(err.message)}</p>`;
+    }
+  }
+
+  // --- Existing customers --------------------------------------------------------------------
+
+  let customers = []; // [{ name, email }] for the open company
+  const customerSet = () => new Set(customers.map((c) => c.email));
+
+  /** Read pasted rows or a CSV: each line's first email address, plus a name if there is one. */
+  function parseCustomers(text) {
+    const out = [];
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const m = line.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+      if (!m) continue;
+      const cells = line.split(/[,;\t]/).map((c) => c.replace(/^"|"$/g, '').trim()).filter((c) => c && !c.includes('@') && !/^[+\d\s()-]{7,}$/.test(c));
+      out.push({ email: m[0].toLowerCase(), name: (cells[0] || '').slice(0, 80) });
+    }
+    return out;
+  }
+
+  function addCustomers(list, { quiet = false } = {}) {
+    const have = customerSet();
+    let added = 0;
+    for (const c of list) {
+      if (!c.email || have.has(c.email)) continue;
+      customers.push(c);
+      have.add(c.email);
+      added += 1;
+    }
+    renderCustomers();
+    if (added) saveProfile();
+    if (!quiet) setStatus(added ? `Added ${added} customer${added === 1 ? '' : 's'} (${customers.length} in the list).` : 'Those customers were already in the list.', 'ok');
+    if (audit) render();
+    return added;
+  }
+
+  function renderCustomers() {
+    $('#customerCount').textContent = customers.length ? `${customers.length} customer${customers.length === 1 ? '' : 's'} saved` : 'None yet';
+    $('#clearCustomers').hidden = !customers.length;
+  }
+
 
   /** "Never count" choices for one row: the address, or the whole domain for business senders. */
   function neverButtons(e) {
     const email = (e.customerEmail || '').toLowerCase();
     if (!email) return '';
     if (e.reason === NEVER) return `<button type="button" class="link small" data-never="remove" data-email="${esc(email)}">Count again</button>`;
-    if (neverOpen !== e.id) return `<button type="button" class="link small" data-never="open" data-id="${e.id}" title="Skip this sender in future audits">Never count…</button>`;
+    if (neverOpen !== e.id) return `<button type="button" class="link small" data-never="open" data-id="${e.id}" title="Don't count this sender in this or future audits">Always skip</button>`;
     const domain = email.split('@')[1] || '';
-    return `<div class="never-menu"><span>Never count:</span>
+    return `<div class="never-menu"><span>Always skip:</span>
       <button type="button" class="secondary small" data-never="${esc(email)}">${esc(email)}</button>
       ${domain && !FREE_MAIL.test(domain) ? `<button type="button" class="secondary small" data-never="@${esc(domain)}">anyone @${esc(domain)}</button>` : ''}
       <button type="button" class="link small" data-never="cancel">Cancel</button></div>`;

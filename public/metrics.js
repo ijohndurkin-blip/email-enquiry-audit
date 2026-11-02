@@ -93,6 +93,17 @@
     const perMailbox = {};
     enquiries.forEach((e) => (e.mailboxes || []).forEach((m) => { perMailbox[m] = (perMailbox[m] || 0) + 1; }));
     const perMonth = (n) => (n * 30) / days;
+    // Follow-ups: conversations where the business replied and then heard nothing back.
+    const asOf = o.asOf || Date.now();
+    let wentQuiet = 0; let chased = 0; let waiting = 0;
+    for (const e of replied) {
+      const state = conversationState(e, asOf);
+      if (state === 'quiet-chased') { wentQuiet += 1; chased += 1; }
+      if (state === 'quiet-not-chased') wentQuiet += 1;
+      if (state === 'waiting') waiting += 1;
+    }
+    const won = enquiries.filter((e) => e.outcome === 'won').length;
+    const lost = enquiries.filter((e) => e.outcome === 'lost').length;
     const mins = Number(o.minutesPerEnquiry);
     return {
       days,
@@ -115,10 +126,42 @@
       byWeekday,
       byHour,
       perMailbox,
+      wentQuiet,
+      chased,
+      notChased: wentQuiet - chased,
+      customerWaiting: waiting,
+      won,
+      lost,
+      winRate: won + lost ? won / (won + lost) : null,
+      existingCustomers: enquiries.filter((e) => e.existing).length,
       minutesPerEnquiry: Number.isFinite(mins) && mins > 0 ? mins : null,
       hoursPerMonth: Number.isFinite(mins) && mins > 0 ? (perMonth(enquiries.length) * mins) / 60 : null,
     };
   }
+
+  const QUIET_DAYS = 3;
+  /**
+   * Where a conversation stands:
+   * 'no-reply' | 'waiting' (customer's latest email unanswered) | 'ongoing' (recent) |
+   * 'quiet-chased' / 'quiet-not-chased' (business replied, customer silent 3+ days; chased = 2+ emails since).
+   */
+  function conversationState(e, asOf = Date.now()) {
+    if (e.replyMatchable === false) return 'unknown';
+    if (!e.firstReplyAt) return 'no-reply';
+    const lastOut = e.lastOutboundAt || e.firstReplyAt;
+    if (e.lastInboundAt > lastOut) return 'waiting';
+    if (asOf - lastOut < QUIET_DAYS * DAY) return 'ongoing';
+    if (e.outsAfterLastIn == null) return 'unknown'; // audits saved before follow-ups were tracked
+    return e.outsAfterLastIn >= 2 ? 'quiet-chased' : 'quiet-not-chased';
+  }
+  const STATE_LABELS = {
+    'no-reply': 'No reply found',
+    waiting: 'Waiting for your reply',
+    ongoing: 'In progress',
+    'quiet-chased': 'Went quiet: chased',
+    'quiet-not-chased': 'Went quiet: not chased',
+    unknown: '',
+  };
 
   /** Human-friendly duration from hours. */
   function duration(h) {
@@ -164,5 +207,5 @@
     return weeks;
   }
 
-  return { compute, workingMs, localParts, localToUtc, median, duration, replyBuckets, weekly, BUCKETS };
+  return { compute, workingMs, localParts, localToUtc, median, duration, replyBuckets, weekly, BUCKETS, conversationState, STATE_LABELS, QUIET_DAYS };
 }));

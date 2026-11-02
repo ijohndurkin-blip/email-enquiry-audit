@@ -89,12 +89,34 @@ Results open in three tabs, written for business owners rather than analysts. **
   Each chart has a one-line takeaway, numbers on the bars, details when you hover over a bar, and a "Show the numbers" table. When comparing periods, "Before" is blue and "After" is cyan. These colours were checked so people with colour blindness can tell them apart, in both light and dark mode.
 - **Enquiries:** the Counted and Not counted lists, with ticking and "Never count…".
 
+## Follow-ups, outcomes and existing customers
+
+**Where each enquiry stands** is worked out from who emailed last:
+
+| Status | Meaning |
+|---|---|
+| No reply found | The business never emailed back. |
+| Waiting for your reply | The customer's latest email hasn't been answered. |
+| In progress | Last email was from the business, less than 3 days ago. |
+| Went quiet: not chased | The business replied, the customer went silent for 3+ days, and the business sent no follow-up. |
+| Went quiet: chased | As above, but the business sent at least one follow-up. |
+
+These feed "At a glance" (*Following up when customers go quiet*, *Customers waiting on you*), the figures, the AI summary and the progress over time.
+
+**Outcomes:** email can't show whether a customer rang up and bought. On the Enquiries tab, mark each enquiry **Won** or **Lost** when you know. The report shows how many became work and the win rate. Outcomes are saved with the audit.
+
+**Existing customers:** under *Existing customers*, paste the business's customer list or import a CSV. Any rows with an email address work, and a name is optional. Enquiries from those addresses are tagged **Existing customer**, and the report shows how many were new. Marking an enquiry **Won** adds that person to the list automatically. The list is saved with the company.
+
+**View:** opens an enquiry's emails, customer and business side by side. They're read live from the mailbox, read-only, only when you click, with quoted history trimmed. Nothing is saved. It needs the mailbox to be connected, and works for audits run since this feature was added.
+
+**Always skip** (on each row) stops counting a sender, or a whole company domain, in this and future audits.
+
 ## Telling real enquiries from other mail
 
 Automated mail (newsletters, notifications, receipts, no-reply senders, account emails) is filtered by rules. Emails from real people about something else, such as suppliers, the accountant or friends, look like enquiries to the rules. Three tools deal with them:
 
 1. **Untick it** on the Counted tab. Your ticks and unticks always win over the rules and the AI.
-2. **Never count…** on any row. Choose the exact address, or everyone at that company's domain (not offered for Gmail, Hotmail and similar). The sender is added to the business's "Never count mail from" list, saved with the business and applied to every future audit. "Count again" undoes it.
+2. **Always skip** on any row. Choose the exact address, or everyone at that company's domain (not offered for Gmail, Hotmail and similar). The sender is added to the business's "Never count mail from" list, saved with the business and applied to every future audit. "Count again" undoes it.
 3. **AI sorting (optional).** Tick *Use AI to check which emails are real enquiries* before running. Each email the rules counted is sorted by Claude into one of: new enquiry, about a job already booked, supplier or trade, personal, sales pitch, automated, spam or other. Anything that isn't a new enquiry moves to Not counted with the AI's reason, so you can tick it back.
    - **What's sent:** the sender's name and address, the subject, whether the business replied, and the first ~800 characters of the customer's latest message, with quoted history removed. Emails the rules already filtered out are never read or sent. Nothing is stored by this tool. Anthropic's commercial terms cover how API data is handled; by default it isn't used to train models.
    - **What it costs:** a few pence per audit. It runs in batches of 15 at low effort.
@@ -162,6 +184,7 @@ AUDIT_ACCESS_KEY=test npm run dev      # http://localhost:3000
 | `api/summary.js` | Writes the plain-English summary from the audit totals (no email content) |
 | `public/charts.js` | The charts, in plain HTML/CSS with no library, so they print cleanly |
 | `api/store.js` / `lib/store.js` | Saved companies and audits in Supabase (server-side, secret key) |
+| `api/thread.js` | Opens one enquiry's emails on request (read-only, nothing stored) |
 | `lib/secret.js` | Encrypts and decrypts saved connections (AES-256-GCM) |
 | `public/mailboxes.js` | Mailbox cards: test connection, saved connections, Sent folder choice |
 | `lib/discover.js` | Finds IMAP settings from an email address (ported from the enquiry app); certificate-name retry, STARTTLS on port 143, lockout-safe sign-in |

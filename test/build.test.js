@@ -155,3 +155,15 @@ test('only possible enquiries are picked for the AI to read', () => {
   assert.strictEqual(isCandidate(inMsg(T0, 'darryn@darryn.co.uk', 'note'), 'enquiries@darryn.co.uk'), false);
   assert.strictEqual(stripQuoted('Yes Tuesday is fine\n\nOn Mon, 5 Oct 2026, Darryn wrote:\n> old text'), 'Yes Tuesday is fine');
 });
+
+test('records follow-ups and where each email lives', () => {
+  const a = inMsg(T0, 'fu@gmail.com', 'Quote', { uid: 5 });
+  a.uid = 5; a.folder = 'INBOX';
+  const r1 = outMsg(T0 + H, 'fu@gmail.com', 'Re: Quote'); r1.uid = 9; r1.folder = 'Sent';
+  const r2 = outMsg(T0 + 4 * D, 'fu@gmail.com', 'Just checking in'); r2.uid = 10; r2.folder = 'Sent';
+  const { enquiries } = buildEnquiries([a, r1, r2], opts);
+  const e = enquiries[0];
+  assert.strictEqual(e.outsAfterLastIn, 2);
+  assert.strictEqual(e.lastOutboundAt, T0 + 4 * D);
+  assert.deepStrictEqual(e.msgs.map((m) => `${m.d}:${m.f}:${m.uid}`), ['in:INBOX:5', 'out:Sent:9', 'out:Sent:10']);
+});

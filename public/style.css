@@ -334,3 +334,29 @@ table.mini .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
 
 .setup-steps { margin: 6px 0 0; padding-left: 20px; }
 .setup-steps li { margin-bottom: 6px; }
+
+/* Enquiry list extras */
+.tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; margin-left: 4px; }
+.warn-text { color: var(--warn); }
+select.outcome { width: auto; margin: 0; padding: 4px 6px; font-size: 13px; }
+.actions-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.list .subject small { margin-top: 3px; }
+.customers summary small { margin-left: 6px; }
+.customers textarea { margin-bottom: 8px; }
+.customers .actions { margin-bottom: 8px; }
+
+/* Conversation viewer */
+.thread-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; background: var(--card); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.thread-dialog::backdrop { background: rgba(6, 20, 40, 0.55); }
+.thread-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.thread-head h2 { margin: 0 0 4px; font-size: 17px; }
+.thread-head .remove { margin-top: -4px; }
+.mail { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 10px 0; background: var(--bg); }
+.mail.out { border-left: 4px solid var(--cyan); margin-left: 24px; }
+.mail.in { border-left: 4px solid var(--series-before); margin-right: 24px; }
+.mail header { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.mail .who { font-weight: 700; color: var(--heading); }
+.mail-meta { font-size: 13px; color: var(--muted); margin: 6px 0; overflow-wrap: anywhere; }
+.mail-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+@media print { select.outcome { display: none; } }
+@media (max-width: 600px) { .mail.out { margin-left: 8px; } .mail.in { margin-right: 8px; } }

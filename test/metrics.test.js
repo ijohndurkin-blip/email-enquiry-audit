@@ -52,3 +52,24 @@ test('reply buckets and weekly counts', () => {
   const w = M.weekly([e(t, 1), e(t + 24 * H, 1), e(t + 8 * 24 * H, 1)], london(2026, 10, 1, 0), london(2026, 10, 15, 0), 'Europe/London');
   assert.deepStrictEqual(w.map((x) => x.count), [0, 2, 1]); // weeks of 28 Sep, 5 Oct, 12 Oct
 });
+
+test('follow-ups: quiet conversations, chased or not, and customers waiting', () => {
+  const now = london(2026, 10, 30, 12);
+  const base = { receivedAt: now - 20 * 24 * H, replyMatchable: true, inboundCount: 1, outboundCount: 1, mailboxes: ['a'] };
+  const list = [
+    { ...base, firstReplyAt: base.receivedAt + H, lastInboundAt: base.receivedAt, lastOutboundAt: base.receivedAt + H, outsAfterLastIn: 1 }, // not chased
+    { ...base, firstReplyAt: base.receivedAt + H, lastInboundAt: base.receivedAt, lastOutboundAt: base.receivedAt + 5 * 24 * H, outsAfterLastIn: 2 }, // chased
+    { ...base, firstReplyAt: base.receivedAt + H, lastInboundAt: now - 2 * 24 * H, lastOutboundAt: base.receivedAt + H, outsAfterLastIn: 0 }, // waiting
+    { ...base, firstReplyAt: now - 24 * H, lastInboundAt: now - 30 * H, lastOutboundAt: now - 24 * H, outsAfterLastIn: 1, outcome: 'won', existing: true }, // ongoing
+    { ...base, firstReplyAt: null, lastInboundAt: base.receivedAt, outcome: 'lost' },
+  ];
+  const m = M.compute(list, { ...w, from: now - 30 * 24 * H, to: now, asOf: now });
+  assert.strictEqual(m.wentQuiet, 2);
+  assert.strictEqual(m.chased, 1);
+  assert.strictEqual(m.notChased, 1);
+  assert.strictEqual(m.customerWaiting, 1);
+  assert.strictEqual(m.won, 1);
+  assert.strictEqual(m.winRate, 0.5);
+  assert.strictEqual(m.existingCustomers, 1);
+  assert.strictEqual(M.conversationState(list[3], now), 'ongoing');
+});
