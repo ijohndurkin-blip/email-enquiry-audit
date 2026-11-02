@@ -17,11 +17,24 @@
 
   <main class="wrap">
     <form id="setup" class="no-print" autocomplete="off">
+      <section class="card keycard" id="keyCard">
+        <label class="field">Access key <small>(the AUDIT_ACCESS_KEY you set in Vercel; remembered on this browser)</small>
+          <input type="password" name="accessKey" autocomplete="current-password">
+        </label>
+      </section>
+
       <section class="card">
         <h2><span class="num">1</span> Business and mailboxes</h2>
+        <div class="row profile-row">
+          <label class="field">Saved businesses
+            <select id="profileSel"></select>
+          </label>
+          <button type="button" class="secondary" id="deleteProfile" hidden>Delete saved business</button>
+        </div>
         <label class="field">Business name <small>(for the report heading)</small>
           <input name="businessName" placeholder="e.g. Darryn's Plumbing">
         </label>
+        <p class="hint">Add each address enquiries arrive at. Enter the email and password, then press <b>Test connection</b>. Once it's connected, the business is saved on this browser for next time.</p>
         <div id="mailboxes"></div>
         <button type="button" class="link" id="addMailbox">+ Add another mailbox</button>
         <details class="more">
@@ -68,9 +81,6 @@
       </section>
 
       <section class="card run">
-        <label class="field">Access key <small>(set in Vercel as AUDIT_ACCESS_KEY)</small>
-          <input type="password" name="accessKey" required autocomplete="current-password">
-        </label>
         <div class="actions">
           <button type="submit" class="primary" id="runBtn">Run audit</button>
           <label class="button secondary">Open a saved audit<input type="file" id="openFile" accept=".json,application/json" hidden></label>
@@ -82,26 +92,9 @@
     <section id="results" hidden></section>
   </main>
 
-  <template id="mailboxTpl">
-    <div class="mailbox">
-      <div class="row">
-        <label class="field">Email address <input type="email" data-k="email" required placeholder="enquiries@business.co.uk" autocomplete="off"></label>
-        <label class="field">Password <input type="password" data-k="password" required autocomplete="new-password"></label>
-        <button type="button" class="remove" title="Remove this mailbox" aria-label="Remove this mailbox">×</button>
-      </div>
-      <details class="more">
-        <summary>Server settings <small>(only if it can't find them itself)</small></summary>
-        <div class="row">
-          <label class="field">Incoming (IMAP) server <input data-k="host" placeholder="mail.business.co.uk"></label>
-          <label class="field narrow">Port <input type="number" data-k="port" placeholder="993"></label>
-          <label class="field">Username <input data-k="user" placeholder="usually the email address"></label>
-        </div>
-        <label class="check"><input type="checkbox" data-k="secure" checked> SSL/TLS</label>
-      </details>
-    </div>
-  </template>
 
   <script src="metrics.js"></script>
+  <script src="mailboxes.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

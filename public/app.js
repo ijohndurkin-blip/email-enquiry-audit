@@ -1,4 +1,4 @@
-/* global EnquiryMetrics */
+/* global EnquiryMetrics, Mailboxes */
 (function () {
   const M = EnquiryMetrics;
   const DAY = 86400000;
@@ -7,57 +7,125 @@
   const statusEl = $('#status');
   const resultsEl = $('#results');
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const PROFILES_KEY = 'auditProfiles';
 
-  let audit = null; // { result, businessName, settings }
+  let audit = null; // { result }
   let tab = 'counted';
+  let profileId = null; // the saved business currently open
 
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode or full */ } },
   };
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
   const num = (x, d = 0) => (x == null ? '–' : (Math.round(x * 10 ** d) / 10 ** d).toLocaleString('en-GB'));
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  // --- Talking to the server -----------------------------------------------------
+
+  function accessKey() {
+    const k = form.accessKey.value.trim();
+    if (k) store.set('auditAccessKey', k);
+    return k;
+  }
+
+  async function api(path, body) {
+    const key = accessKey();
+    if (!key) {
+      form.accessKey.focus();
+      throw new Error('Enter the access key at the top of the page first.');
+    }
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Access-Key': key }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => null);
+    if (!data) throw new Error(res.status === 504 ? 'The mail server took too long to answer. Try again, or try a shorter period.' : `The server replied with an error (${res.status}).`);
+    if (res.status === 401 || res.status === 500) { form.accessKey.focus(); throw new Error(data.error); }
+    if (!res.ok && !('ok' in data)) throw Object.assign(new Error(data.error || `Error ${res.status}`), { data });
+    return data;
+  }
+
+  // --- Saved businesses -------------------------------------------------------------
+
+  function profiles() {
+    try { return JSON.parse(store.get(PROFILES_KEY) || '[]'); } catch { return []; }
+  }
+
+  function renderProfiles() {
+    const list = profiles();
+    $('#profileSel').innerHTML = `<option value="">${list.length ? '+ New business' : 'None saved yet'}</option>${list
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => `<option value="${esc(p.id)}"${p.id === profileId ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}`;
+    $('#deleteProfile').hidden = !profileId;
+  }
+
+  /** Save the open business (only once at least one mailbox is connected). */
+  function saveProfile() {
+    if (!Mailboxes.connectedCount() && !profileId) return;
+    const list = profiles();
+    const name = form.businessName.value.trim() || (Mailboxes.firstEmail().split('@')[1] || 'Business');
+    if (!profileId) profileId = `p${Date.now().toString(36)}`;
+    const entry = { id: profileId, name, savedAt: Date.now(), settings: settingsSnapshot({ tokens: true }) };
+    const i = list.findIndex((p) => p.id === profileId);
+    if (i >= 0) list[i] = entry; else list.push(entry);
+    store.set(PROFILES_KEY, JSON.stringify(list));
+    store.set('auditLastProfile', profileId);
+    renderProfiles();
+  }
+
+  function openProfile(id) {
+    const p = profiles().find((x) => x.id === id);
+    profileId = p ? p.id : null;
+    store.set('auditLastProfile', profileId || '');
+    applySettings(p ? p.settings : null);
+    audit = null;
+    resultsEl.hidden = true;
+    setStatus(p ? `Opened ${esc(p.name)}.` : '', p ? 'ok' : '');
+    renderProfiles();
+  }
+
+  function deleteProfile() {
+    const p = profiles().find((x) => x.id === profileId);
+    if (!p || !confirm(`Delete the saved business "${p.name}" and its mailbox connections from this browser?`)) return;
+    store.set(PROFILES_KEY, JSON.stringify(profiles().filter((x) => x.id !== profileId)));
+    openProfile(null);
+  }
 
   // --- Setup form -------------------------------------------------------------
 
-  function addMailbox(values = {}) {
-    const node = $('#mailboxTpl').content.firstElementChild.cloneNode(true);
-    node.querySelectorAll('[data-k]').forEach((input) => {
-      const v = values[input.dataset.k];
-      if (input.type === 'checkbox') input.checked = v !== false;
-      else if (v != null) input.value = v;
-    });
-    $('.remove', node).addEventListener('click', () => {
-      if ($('#mailboxes').children.length > 1) node.remove();
-    });
-    $('#mailboxes').appendChild(node);
+  function defaultDates() {
+    const today = new Date();
+    form.aTo.value = iso(today);
+    form.aFrom.value = iso(new Date(today.getTime() - 29 * DAY));
   }
 
   function initForm() {
-    const tzSel = form.tz;
     const here = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
     const zones = (Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [here]);
-    tzSel.innerHTML = zones.map((z) => `<option${z === here ? ' selected' : ''}>${esc(z)}</option>`).join('');
-
+    form.tz.innerHTML = zones.map((z) => `<option${z === here ? ' selected' : ''}>${esc(z)}</option>`).join('');
     $('#workDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="check day"><input type="checkbox" value="${d}"${d >= 1 && d <= 5 ? ' checked' : ''}> ${DAYS[d]}</label>`).join('');
-
-    const today = new Date();
-    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    form.aTo.value = iso(today);
-    form.aFrom.value = iso(new Date(today.getTime() - 29 * DAY));
-
+    defaultDates();
     form.accessKey.value = store.get('auditAccessKey') || '';
-    addMailbox();
-    $('#addMailbox').addEventListener('click', () => addMailbox());
+    form.accessKey.addEventListener('change', accessKey);
+
+    Mailboxes.init($('#mailboxes'), { api, onChange: saveProfile });
+    $('#addMailbox').addEventListener('click', () => Mailboxes.add());
+    $('#profileSel').addEventListener('change', (e) => openProfile(e.target.value || null));
+    $('#deleteProfile').addEventListener('click', deleteProfile);
     form.compare.addEventListener('change', syncCompare);
-    syncCompare();
 
     // Changing hours, minutes or periods re-works the numbers without reading the mailboxes again.
-    ['tz', 'workStart', 'workEnd', 'minsA', 'minsB', 'aFrom', 'aTo', 'bFrom', 'bTo', 'compare', 'businessName'].forEach((n) => form[n].addEventListener('change', () => audit && render()));
-    $('#workDays').addEventListener('change', () => audit && render());
+    ['tz', 'workStart', 'workEnd', 'minsA', 'minsB', 'aFrom', 'aTo', 'bFrom', 'bTo', 'compare', 'businessName', 'otherAddresses', 'ignoreSenders'].forEach((n) => form[n].addEventListener('change', () => {
+      if (audit) render();
+      if (profileId) saveProfile();
+    }));
+    $('#workDays').addEventListener('change', () => { if (audit) render(); if (profileId) saveProfile(); });
     form.addEventListener('submit', run);
     $('#openFile').addEventListener('change', openSaved);
+
+    const last = store.get('auditLastProfile');
+    if (last && profiles().some((p) => p.id === last)) openProfile(last);
+    else { renderProfiles(); syncCompare(); }
+    if (!form.accessKey.value) form.accessKey.focus();
   }
 
   function syncCompare() {
@@ -95,14 +163,6 @@
     return list;
   }
 
-  function mailboxValues() {
-    return [...$('#mailboxes').children].map((node) => {
-      const v = {};
-      node.querySelectorAll('[data-k]').forEach((i) => { v[i.dataset.k] = i.type === 'checkbox' ? i.checked : i.value.trim(); });
-      return v;
-    }).filter((v) => v.email);
-  }
-
   function setStatus(html, kind = '') {
     statusEl.className = kind;
     statusEl.innerHTML = html;
@@ -112,35 +172,28 @@
     ev.preventDefault();
     const ps = periods();
     if (!ps.length) return setStatus('Choose the dates to audit.', 'error');
-    const accessKey = form.accessKey.value.trim();
-    store.set('auditAccessKey', accessKey);
+    const pending = Mailboxes.pending();
+    if (pending.length) return setStatus(`Enter the password for ${esc(pending.join(', '))} and press Test connection, or remove it.`, 'error');
+    const mailboxes = Mailboxes.forAudit();
+    if (!mailboxes.length) return setStatus('Connect at least one mailbox first.', 'error');
     const btn = $('#runBtn');
     btn.disabled = true;
-    setStatus('<span class="spinner"></span> Signing in and reading the mailboxes. This usually takes 10–40 seconds…');
+    setStatus('<span class="spinner"></span> Reading the mailboxes. This usually takes 10–40 seconds…');
     try {
-      const res = await fetch('/api/audit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Access-Key': accessKey },
-        body: JSON.stringify({
-          from: new Date(Math.min(...ps.map((p) => p.from))).toISOString(),
-          to: new Date(Math.max(...ps.map((p) => p.to))).toISOString(),
-          mailboxes: mailboxValues(),
-          otherAddresses: form.otherAddresses.value,
-          ignoreSenders: form.ignoreSenders.value,
-        }),
+      const data = await api('/api/audit', {
+        from: new Date(Math.min(...ps.map((p) => p.from))).toISOString(),
+        to: new Date(Math.max(...ps.map((p) => p.to))).toISOString(),
+        mailboxes,
+        otherAddresses: form.otherAddresses.value,
+        ignoreSenders: form.ignoreSenders.value,
       });
-      const data = await res.json().catch(() => ({ error: res.status === 504 ? 'The mailboxes took too long to read. Try a shorter period, or one mailbox at a time.' : `The server replied with an error (${res.status}).` }));
-      if (!res.ok) {
-        setStatus(`<strong>${esc(data.error)}</strong>${mailboxErrors(data.mailboxes)}`, 'error');
-        return;
-      }
-      audit = { result: data, savedAt: null };
+      audit = { result: data };
       tab = 'counted';
       setStatus('');
       render();
       resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
-      setStatus(`<strong>Couldn't reach the audit server.</strong> ${esc(err.message)}`, 'error');
+      setStatus(`<strong>${esc(err.message)}</strong>${mailboxErrors(err.data && err.data.mailboxes)}`, 'error');
     } finally {
       btn.disabled = false;
     }
@@ -153,15 +206,32 @@
 
   // --- Saving and opening ------------------------------------------------------
 
-  function settingsSnapshot() {
+  function settingsSnapshot({ tokens = false } = {}) {
     const w = work();
     return {
       businessName: form.businessName.value, ...w,
       aFrom: form.aFrom.value, aTo: form.aTo.value, compare: form.compare.checked, bFrom: form.bFrom.value, bTo: form.bTo.value,
       minsA: form.minsA.value, minsB: form.minsB.value,
-      mailboxes: mailboxValues().map(({ password, ...rest }) => rest), // never save passwords
+      mailboxes: Mailboxes.snapshot({ tokens }), // passwords are never saved
       otherAddresses: form.otherAddresses.value, ignoreSenders: form.ignoreSenders.value,
     };
+  }
+
+  function applySettings(s) {
+    if (!s) {
+      ['businessName', 'minsA', 'minsB', 'bFrom', 'bTo', 'otherAddresses', 'ignoreSenders'].forEach((k) => { form[k].value = ''; });
+      form.compare.checked = false;
+      defaultDates();
+      Mailboxes.load([]);
+      syncCompare();
+      return;
+    }
+    ['businessName', 'aFrom', 'aTo', 'bFrom', 'bTo', 'minsA', 'minsB', 'workStart', 'workEnd', 'otherAddresses', 'ignoreSenders'].forEach((k) => { if (s[k] != null) form[k].value = s[k]; });
+    if (s.tz) form.tz.value = s.tz;
+    form.compare.checked = Boolean(s.compare);
+    if (Array.isArray(s.workDays)) $('#workDays').querySelectorAll('input').forEach((i) => { i.checked = s.workDays.includes(Number(i.value)); });
+    if (Array.isArray(s.mailboxes)) Mailboxes.load(s.mailboxes);
+    syncCompare();
   }
 
   function download(name, type, text) {
@@ -176,6 +246,7 @@
   const fileBase = () => `enquiry-audit-${(form.businessName.value || 'business').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${form.aFrom.value}`;
 
   function saveAudit() {
+    // The audit file carries no passwords or connection tokens.
     download(`${fileBase()}.json`, 'application/json', JSON.stringify({ type: 'enquiry-audit', version: 1, settings: settingsSnapshot(), result: audit.result }, null, 2));
   }
 
@@ -186,18 +257,12 @@
     try {
       const data = JSON.parse(await file.text());
       if (data.type !== 'enquiry-audit' || !data.result) throw new Error('This isn\'t a saved enquiry audit.');
-      const s = data.settings || {};
-      ['businessName', 'aFrom', 'aTo', 'bFrom', 'bTo', 'minsA', 'minsB', 'workStart', 'workEnd', 'otherAddresses', 'ignoreSenders'].forEach((k) => { if (s[k] != null) form[k].value = s[k]; });
-      if (s.tz) form.tz.value = s.tz;
-      form.compare.checked = Boolean(s.compare);
-      syncCompare();
-      if (Array.isArray(s.workDays)) $('#workDays').querySelectorAll('input').forEach((i) => { i.checked = s.workDays.includes(Number(i.value)); });
-      if (Array.isArray(s.mailboxes) && s.mailboxes.length) {
-        $('#mailboxes').innerHTML = '';
-        s.mailboxes.forEach((m) => addMailbox(m));
-      }
+      const s = { ...(data.settings || {}) };
+      // Keep this browser's saved connections if the file is for the business that's open.
+      if (Mailboxes.connectedCount()) delete s.mailboxes;
+      applySettings(s);
       audit = { result: data.result };
-      setStatus(`Opened the audit saved on ${new Date(data.result.generatedAt).toLocaleString('en-GB')}. Enter passwords only if you want to read the mailboxes again.`, 'ok');
+      setStatus(`Opened the audit saved on ${new Date(data.result.generatedAt).toLocaleString('en-GB')}.`, 'ok');
       render();
     } catch (err) {
       setStatus(esc(err.message), 'error');
