@@ -865,24 +865,57 @@
   }
 
   function csv() {
+    download(`${fileBase()}.csv`, 'text/csv', toCsv(summaryRows()));
+  }
+
+  /** The enquiry summary, optionally with each enquiry's emails (texts: map from fetchTexts). */
+  function summaryRows(texts) {
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
-    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'AI check', 'Reason not counted / note']];
-    for (const e of audit.result.enquiries) {
+    const rows = [['Enquiry #', 'Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'AI check', 'Reason not counted / note',
+      ...(texts ? ["Customer's enquiry (email text)", "Business's first reply (email text)", 'Rest of the conversation'] : [])]];
+    for (const e of audit.result.enquiries.slice().sort((a, b) => a.receivedAt - b.receivedAt)) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
       const w = work();
       rows.push([
-        e.include ? 'yes' : 'no', p ? p.label : '', fmt(e.receivedAt), e.customerName, e.customerEmail, e.subject, e.mailboxes.join(' '),
+        e.id, e.include ? 'yes' : 'no', p ? p.label : '', fmt(e.receivedAt), e.customerName, e.customerEmail, e.subject, e.mailboxes.join(' '),
         e.viaForm ? 'yes' : '', fmt(e.firstReplyAt),
         e.firstReplyAt ? ((e.firstReplyAt - e.receivedAt) / 3600000).toFixed(2) : '',
         e.firstReplyAt ? (M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000).toFixed(2) : '',
         e.inboundCount, e.outboundCount, M.STATE_LABELS[M.conversationState(e, Date.parse(audit.result.generatedAt) || Date.now())] || '', e.outcome || '', e.existing ? 'yes' : '', e.quality ? e.quality.score : '', e.quality ? e.quality.tip : '',
         e.ai ? `${e.ai.label}: ${e.ai.reason}` : '', e.reason || e.note || '',
+        ...(texts ? conversationColumns(e, texts, fmt) : []),
       ]);
     }
-    const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    download(`${fileBase()}.csv`, 'text/csv', `﻿${rows.map((r) => r.map(cell).join(',')).join('\r\n')}`);
+    return rows;
+  }
+
+  /**
+   * Three text columns for one enquiry: what the customer asked (every email before the first
+   * reply, with subjects), the first reply, and everything after, each email labelled.
+   */
+  function conversationColumns(e, texts, fmt) {
+    const msgs = (e.msgs || []).map((ref) => ({ ref, t: ref.uid ? texts.get(refKey(ref)) : null }));
+    if (!msgs.length) return ['(email text not available for this enquiry)', '', ''];
+    const body = ({ t }) => (!t ? '(not read)' : t.missing ? '(email no longer in the mailbox)' : (t.text || '(no text)'));
+    const label = ({ ref, t }) => `${ref.d === 'out' ? (ref.mis ? 'Business (sent to its own address, not the customer)' : 'Business') : 'Customer'}, ${fmt(t && t.date ? Date.parse(t.date) : ref.at)}${t && t.subject ? ` (${t.subject})` : ''}`;
+    const firstOut = msgs.findIndex((m) => m.ref.d === 'out' && !m.ref.mis);
+    const before = firstOut === -1 ? msgs : msgs.slice(0, firstOut);
+    const asked = before.filter((m) => m.ref.d === 'in');
+    const enquiry = asked.map((m) => `${asked.length > 1 ? `${label(m)}:\n` : (m.t && m.t.subject ? `Subject: ${m.t.subject}\n` : '')}${body(m)}`).join('\n\n---\n\n');
+    const reply = firstOut === -1 ? '(no reply found)' : `${label(msgs[firstOut])}:\n${body(msgs[firstOut])}`;
+    const rest = [...before.filter((m) => m.ref.d === 'out'), ...(firstOut === -1 ? [] : msgs.slice(firstOut + 1))]
+      .map((m) => `${label(m)}:\n${body(m)}`).join('\n\n---\n\n');
+    return [enquiry, reply, rest];
+  }
+
+  function exportSummaryWithEmails() {
+    runExport('enquiries with emails', async () => {
+      const { texts, note } = await fetchTexts(audit.result.enquiries.flatMap((e) => e.msgs || []), 'enquiries with emails');
+      download(`${fileBase()}-enquiries-with-emails.csv`, 'text/csv', toCsv(summaryRows(texts)));
+      return note;
+    });
   }
 
   // --- Results -------------------------------------------------------------------
@@ -926,6 +959,7 @@
             <summary class="button secondary">${exportBusy ? '<span class="spinner"></span>' : ''}Download ▾</summary>
             <div class="dl-list">
               <button type="button" data-act="csv"><b>Enquiries summary (CSV)</b><small>One row per enquiry: dates, reply times, status, outcome, quality.</small></button>
+              <button type="button" data-act="csv-summary-text"${exportBusy ? ' disabled' : ''}><b>Enquiries summary with emails (CSV)</b><small>The same one row per enquiry, plus the customer's email, the business's reply and the rest of the conversation in full.</small></button>
               <button type="button" data-act="csv-convo"${exportBusy ? ' disabled' : ''}><b>Conversations with email text (CSV)</b><small>Every enquiry with each customer email and business reply in full.</small></button>
               <button type="button" data-act="csv-all"${exportBusy || !audit.result.log ? ' disabled' : ''}><b>All emails with text (CSV)</b><small>${audit.result.log ? 'Every email the audit read, with what it decided about each one. Use it to spot missed enquiries.' : 'Run the audit again to get this (not kept in saved audits).'}</small></button>
             </div>
@@ -969,6 +1003,7 @@
       if (menu) menu.open = false;
       if (b.dataset.act === 'csv') csv();
       if (b.dataset.act === 'csv-convo') exportConversations();
+      if (b.dataset.act === 'csv-summary-text') exportSummaryWithEmails();
       if (b.dataset.act === 'csv-all') exportAllEmails();
       if (b.dataset.act === 'save') saveAudit();
       if (b.dataset.act === 'print') window.print();

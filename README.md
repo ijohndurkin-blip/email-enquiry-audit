@@ -98,11 +98,12 @@ Results open in three tabs, written for business owners rather than analysts. **
 
 ## Downloads
 
-The **Download** menu above the results has three files:
+The **Download** menu above the results has four files:
 
 | File | What's in it |
 |---|---|
 | **Enquiries summary (CSV)** | One row per enquiry: dates, reply times, where it stands, outcome, reply quality, AI check, reason if not counted. |
+| **Enquiries summary with emails (CSV)** | The same one row per enquiry, plus three text columns: **the customer's enquiry** (every email they sent before the first reply, with subjects), **the business's first reply**, and **the rest of the conversation** (each email labelled Customer/Business with date and subject). The easiest file for reading through enquiries in Excel. |
 | **Conversations with email text (CSV)** | Every enquiry (counted and not), one row per email in it: customer emails and business replies **with their full text**, plus the quality score and tip on the first reply. Use it to check the scoring and see what's really being said. |
 | **All emails with text (CSV)** | **Every email the audit read**, received and sent, with its full text and **what the audit decided about it**. For example: counted as enquiry #12, not counted (newsletter, receipt…), customer follow-up, business reply, duplicate, internal, sent but not a reply to any enquiry, or before the period. Filter on "What the audit decided" to spot enquiries the tool missed. |
 
