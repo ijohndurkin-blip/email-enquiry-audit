@@ -416,6 +416,7 @@
 
     resultsEl.hidden = false;
     resultsEl.innerHTML = `
+      <div class="report-brand"><img src="logo.png" alt="Rare Squared Labs"><span>Enquiry audit by Rare Squared Labs</span></div>
       <div class="results-head">
         <div>
           <h2>${esc(name ? `${name}: enquiry audit` : 'Enquiry audit')}</h2>
@@ -437,6 +438,7 @@
         ${bars('When enquiries arrive: hour of day', stats[0].m.byHour.map((n, h) => [h % 3 ? '' : String(h).padStart(2, '0'), n, `${String(h).padStart(2, '0')}:00`]), true)}
       </div>
       ${table(r, ps, w)}
+      <p class="report-foot">Prepared by Rare Squared Labs · ${esc(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</p>
       <p class="method">How this is counted: an enquiry is a conversation with one customer email address (website-form emails are credited to the address in Reply-To). A customer who writes again after ${14} quiet days starts a new enquiry. Reply time runs from their first email to the first email the business sent back to that address from any audited mailbox. Newsletters, receipts, notifications, auto-replies and bounces are left out unless the business replied to them. Replies by phone can't be seen, so "No reply found" may include some enquiries that were phoned back.</p>
     `;
     resultsEl.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
