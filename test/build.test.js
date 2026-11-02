@@ -114,3 +114,36 @@ test('a reply to an email the business sent first is not a new enquiry', () => {
   assert.strictEqual(enquiries[0].include, false);
   assert.strictEqual(enquiries[0].reason, 'Reply to an email the business sent first');
 });
+
+test('website and service notifications are not enquiries (from a real test mailbox)', () => {
+  const { enquiries } = buildEnquiries([
+    inMsg(T0, 'wordpress@co.uk', '[Rare Squared Labs] New Admin Email Address', { name: 'WordPress' }),
+    inMsg(T0 + H, 'googlecloud@google.com', 'Important: 30 days left in your Google Cloud Free Trial'),
+    inMsg(T0 + 2 * H, 'craig@mail.com', '(no subject)'),
+  ], opts);
+  const by = Object.fromEntries(enquiries.map((e) => [e.customerEmail, e]));
+  assert.strictEqual(by['wordpress@co.uk'].include, false);
+  assert.strictEqual(by['wordpress@co.uk'].reason, 'Website or system notification');
+  assert.strictEqual(by['googlecloud@google.com'].include, false);
+  assert.strictEqual(by['craig@mail.com'].include, true);
+});
+
+test('the "never count" list is applied', () => {
+  const { enquiries } = buildEnquiries([inMsg(T0, 'orders@supplier.co.uk', 'Delivery tomorrow')], { ...opts, ignoreSenders: ['supplier.co.uk'] });
+  assert.strictEqual(enquiries[0].include, false);
+  assert.strictEqual(enquiries[0].reason, 'On your "never count" list');
+});
+
+test('form emails without Reply-To use the customer address found in the text', () => {
+  const { needsBody, scanBody } = require('../lib/build');
+  const m = inMsg(T0, 'wordpress@darryn.co.uk', 'New message from Ian Kelly');
+  assert.strictEqual(needsBody(m, 'enquiries@darryn.co.uk'), true);
+  const found = scanBody('Name: Ian Kelly\nEmail: Ian.Kelly@outlook.com\nMessage: Need a boiler service\n--\nSent from enquiries@darryn.co.uk');
+  Object.assign(m, { bodyEmails: found.emails, bodyName: found.name });
+  const { enquiries } = buildEnquiries([m, outMsg(T0 + 2 * H, 'ian.kelly@outlook.com', 'Re: your message')], opts);
+  assert.strictEqual(enquiries.length, 1);
+  assert.strictEqual(enquiries[0].customerEmail, 'ian.kelly@outlook.com');
+  assert.strictEqual(enquiries[0].customerName, 'Ian Kelly');
+  assert.strictEqual(enquiries[0].viaForm, true);
+  assert.strictEqual(enquiries[0].firstReplyAt - enquiries[0].receivedAt, 2 * H);
+});

@@ -118,6 +118,7 @@ button, .button { font: inherit; border-radius: 8px; padding: 10px 16px; cursor:
   .no-print, .top, form { display: none !important; }
   #results { margin: 0; }
   .card, .tile { break-inside: avoid; border-color: #ccc; }
+  .fill, .tick { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #2456d6 !important; }
 }
 
 /* Mailbox connections */

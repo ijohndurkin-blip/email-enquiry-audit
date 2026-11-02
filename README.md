@@ -15,7 +15,7 @@ It works with any email host that supports IMAP: cPanel and most UK hosting, GoD
 ## What it does and doesn't touch
 
 - **Read-only.** Mailboxes are opened in read-only mode (IMAP `EXAMINE`), so nothing is marked as read, moved or deleted.
-- **Headers only.** It reads sender, recipient, subject, date and the reply-chain headers. It never downloads email bodies or attachments.
+- **Headers only, except form emails.** It reads sender, recipient, subject, date and the reply-chain headers. Attachments are never downloaded. The one exception: a website-form email with no reply-to address has its first 60 KB read, only to find the customer's email address in the text.
 - **No database.** Results stay in your browser until you download them. Passwords are never logged or sent back.
 - **Saved connections are encrypted.** When a mailbox connects, the server sends back an encrypted token, and your browser keeps that instead of the password. The token can only be opened by this deployment's server, using a key made from `AUDIT_ACCESS_KEY`. If you change the access key, saved connections stop working and each mailbox needs connecting again. Saved audit files never contain tokens or passwords.
 - **Locked with an access key.** Without `AUDIT_ACCESS_KEY` set, the API refuses every request, so nobody else can use your deployment to try passwords against mail servers.
@@ -61,7 +61,7 @@ Every failed test shows the reason, with a **What it tried** list of each step.
 ## How it counts
 
 - **Enquiry:** a conversation with one customer email address. A customer who writes again after 14 quiet days, without replying to an earlier email, starts a new enquiry.
-- **Website-form emails:** form emails sent from `wordpress@`, `no-reply@`, Wix, Squarespace or the business's own domain are credited to the customer address in Reply-To. If a form email has no customer address, it's still counted, but its reply time can't be checked.
+- **Website-form emails:** form emails sent from `wordpress@`, `no-reply@`, Wix, Squarespace or the business's own domain are credited to the customer address in Reply-To. If there's no Reply-To, it reads the form email's text for the customer's address. Only if no address is found is the email counted without a reply time.
 - **First reply:** the first email any audited mailbox sent to that customer address after their enquiry. Replies are read from each mailbox's Sent folder.
 - **Left out automatically, unless the business replied:**
   - newsletters (`List-Unsubscribe` headers)
@@ -71,6 +71,9 @@ Every failed test shows the reason, with a **What it tried** list of each step.
   - bounces
   - mail the server marked as spam
   - mail from the business itself
+  - website and system notifications (WordPress, form plugins)
+  - account and service emails from companies like Google, Microsoft, PayPal or your web host (lead sites like Checkatrade are deliberately not on this list)
+  - senders on your "Never count mail from" list
 - **Conversations already under way:** if a conversation started before the period, or the customer was replying to an email the business sent first, it appears under *Not counted* with that reason.
 - **Phone replies** can't be seen, so "No reply found" may include some enquiries that were answered by phone.
 
