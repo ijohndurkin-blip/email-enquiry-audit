@@ -55,6 +55,7 @@
     if (!form.accessKey.value.trim()) return;
     try {
       const r = await api('/api/status', {});
+      keyProblem = '';
       aiStatus = { ai: Boolean(r.ai), model: r.aiModel };
       storeSetup = r.storeSetup || null;
       if (Boolean(r.store) !== remote) {
@@ -69,7 +70,12 @@
         const last = store.get('auditLastProfile');
         if (last && companies.some((p) => p.id === last)) openProfile(last); else { profileId = null; renderProfiles(); }
       }
-    } catch { aiStatus = { ai: false, model: null }; }
+    } catch (err) {
+      aiStatus = { ai: false, model: null };
+      keyProblem = /access key/i.test(err.message) ? 'Wrong access key: check it and try again' : 'Couldn\'t reach the server';
+      setStatus(esc(err.message), 'error');
+      renderProfiles();
+    }
     $('#aiRow').hidden = !aiStatus.ai;
     $('#aiOff').hidden = aiStatus.ai;
     if (audit) render();
@@ -80,6 +86,7 @@
   let companies = []; // [{ id, name, goLive, settings, runs: [...] }]
   let remote = false; // true when the server stores companies in Supabase
   let storeSetup = null; // why Supabase isn't on yet, from /api/status
+  let keyProblem = ''; // e.g. "Wrong access key", shown in the companies list
   let saveChain = Promise.resolve();
   let saveTimer = null;
   const baselineCache = {}; // company id -> full baseline audit (with its enquiries)
@@ -106,10 +113,12 @@
 
   function renderProfiles() {
     const list = companies.slice().sort((a, b) => a.name.localeCompare(b.name));
-    $('#profileSel').innerHTML = `<option value="">${list.length ? '+ New company' : 'None saved yet'}</option>${list
+    const noKey = !form.accessKey.value.trim();
+    const empty = keyProblem || (noKey ? 'Enter the access key above to load your companies' : 'None saved yet');
+    $('#profileSel').innerHTML = `<option value="">${list.length ? '+ New company' : esc(empty)}</option>${list
       .map((p) => `<option value="${esc(p.id)}"${p.id === profileId ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}`;
     $('#deleteProfile').hidden = !profileId;
-    $('#storeNote').textContent = remote ? '(saved in your Supabase)' : '(saved on this browser)';
+    $('#storeNote').textContent = remote ? '(saved in your Supabase, on every device)' : noKey ? '(enter the access key to load them)' : '(saved on this browser only)';
     renderTracker();
   }
 
@@ -421,7 +430,10 @@
     $('#workDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="check day"><input type="checkbox" value="${d}"${d >= 1 && d <= 5 ? ' checked' : ''}> ${DAYS[d]}</label>`).join('');
     defaultDates();
     form.accessKey.value = store.get('auditAccessKey') || '';
-    form.accessKey.addEventListener('change', () => { accessKey(); checkStatus(); });
+    let keyTimer = null;
+    const keyEntered = () => { clearTimeout(keyTimer); keyTimer = setTimeout(() => { accessKey(); checkStatus(); }, 900); };
+    form.accessKey.addEventListener('input', keyEntered);
+    form.accessKey.addEventListener('change', keyEntered);
 
     Mailboxes.init($('#mailboxes'), { api, onChange: saveProfile });
     $('#addMailbox').addEventListener('click', () => Mailboxes.add());
