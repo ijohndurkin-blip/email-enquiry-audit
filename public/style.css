@@ -389,3 +389,10 @@ select.outcome { width: auto; margin: 0; padding: 4px 6px; font-size: 13px; }
 .missed h3 { display: flex; align-items: center; gap: 10px; }
 .missed .badge { flex: 0 0 auto; }
 .missed ul { margin: 6px 0 10px; padding-left: 20px; }
+
+/* Minutes estimate */
+.estimate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 10px; }
+.estimate .hint { font-size: 13px; }
+.estimate-box { border: 1px solid var(--line); border-left: 4px solid var(--cyan); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; background: var(--bg); }
+.est-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4px 16px; margin: 8px 0 4px; font-size: 14px; }
+.est-parts span { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dashed var(--line); padding: 2px 0; }

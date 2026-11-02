@@ -130,6 +130,23 @@ How the verdict works:
 
 **What's sent:** the customer's first email and the business's first reply, read live from the mailbox, with quoted history trimmed and up to about 2,000 characters each. Only the scores and tips are kept.
 
+## Estimating "minutes per enquiry before the app"
+
+After running the **Before the app** audit, press **Work out "before" from the emails** in section 3. It reads the business's real replies (up to 40 enquiries spread across the period) and estimates the time each took by hand:
+
+| Part | Rule |
+|---|---|
+| Reading the customer's emails | 240 words a minute |
+| Writing the replies (thinking + typing) | 20 words a minute, with quoted text and the sign-off/signature left out |
+| Admin per reply (opening, sending, switching tasks) | +1 min |
+| The work behind a reply, judged by AI from its content | +2 min if it quotes prices · +8 for a worked-out quote (sizes, quantities, several items) · +2 for dates, times or stock · +2 for a technical answer |
+| Attachments (from the email itself) | +3 min |
+| Mostly a standard / copy-paste reply (AI) | writing counts 30% |
+
+It fills in the box with the average and shows the breakdown, how often each kind of work came up, and the rates used. Each enquiry's estimate is in the summary CSVs. Without AI it uses word counts only. Only the minutes and short notes come back from the server; no email text is kept.
+
+It's an estimate: emails can't show phone calls or time spent thinking before writing. To make the figure solid for a case study, time 3–5 replies with a stopwatch and adjust it if needed. It's meant for replies written **by hand**, so run it on the Before audit; for the "with the app" figure, see the README's suggestion to log handling time in the enquiry app.
+
 ## Follow-ups, outcomes and existing customers
 
 **Where each enquiry stands** is worked out from who emailed last:
@@ -226,6 +243,7 @@ AUDIT_ACCESS_KEY=test npm run dev      # http://localhost:3000
 | `public/charts.js` | The charts, in plain HTML/CSS with no library, so they print cleanly |
 | `api/store.js` / `lib/store.js` | Saved companies and audits in Supabase (server-side, secret key) |
 | `api/thread.js` | Opens one enquiry's emails on request (read-only, nothing stored) |
+| `api/effort.js` / `lib/effort.js` | Estimates minutes per enquiry from the replies' length and the work behind them |
 | `api/quality.js` | Checks the quality of first replies with AI (scores and tips only are returned) |
 | `lib/bodies.js` | Reads specific emails' text from a mailbox on request (read-only) |
 | `lib/secret.js` | Encrypts and decrypts saved connections (AES-256-GCM) |

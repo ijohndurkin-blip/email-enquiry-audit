@@ -6,7 +6,8 @@
     "api/summary.js": { "maxDuration": 60 },
     "api/store.js": { "maxDuration": 30 },
     "api/thread.js": { "maxDuration": 30 },
-    "api/quality.js": { "maxDuration": 60 }
+    "api/quality.js": { "maxDuration": 60 },
+    "api/effort.js": { "maxDuration": 60 }
   },
   "headers": [
     {

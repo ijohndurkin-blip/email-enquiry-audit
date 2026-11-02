@@ -3,7 +3,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const api = { audit: require('./api/audit'), connect: require('./api/connect'), status: require('./api/status'), classify: require('./api/classify'), summary: require('./api/summary'), store: require('./api/store'), thread: require('./api/thread'), quality: require('./api/quality') };
+const api = { audit: require('./api/audit'), connect: require('./api/connect'), status: require('./api/status'), classify: require('./api/classify'), summary: require('./api/summary'), store: require('./api/store'), thread: require('./api/thread'), quality: require('./api/quality'), effort: require('./api/effort') };
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const root = path.join(__dirname, 'public');

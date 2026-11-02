@@ -464,10 +464,14 @@
       if (!confirm(`Remove all ${customers.length} customers from this company's list?`)) return;
       customers = [];
       renderCustomers();
+      estimate = null;
+      renderEstimate();
       saveProfile();
       if (audit) render();
     });
     $('#threadClose').addEventListener('click', () => $('#threadDialog').close());
+    $('#estimateMins').addEventListener('click', estimateMinutes);
+    form.minsA.addEventListener('input', () => { if (estimate && Number(form.minsA.value) !== Math.round(estimate.minutes * 2) / 2) estimate.edited = true; });
     renderCustomers();
     $('#openFile').addEventListener('change', openSaved);
 
@@ -475,6 +479,7 @@
     const last = store.get('auditLastProfile');
     if (last && companies.some((p) => p.id === last)) openProfile(last);
     else { renderProfiles(); syncCompare(); }
+    renderEstimate();
     if (!form.accessKey.value) form.accessKey.focus();
     else checkStatus();
   }
@@ -665,6 +670,92 @@
     }
   }
 
+  // --- Estimating minutes per enquiry (by hand) from the emails --------------------------------
+
+  let estimate = null; // { minutes, parts, n, usedAi, notes, at }
+  let estimateBusy = false;
+
+  function estimateCandidates() {
+    if (!audit) return [];
+    return audit.result.enquiries.filter((e) => e.include && (e.msgs || []).some((m) => m.d === 'out'));
+  }
+
+  function renderEstimate() {
+    const btn = $('#estimateMins');
+    const hint = $('#estimateHint');
+    const n = estimateCandidates().length;
+    btn.disabled = estimateBusy || !n || !Mailboxes.connectedCount();
+    btn.innerHTML = estimateBusy ? '<span class="spinner"></span>Working it out…' : 'Work out "before" from the emails';
+    hint.textContent = !audit ? 'Run an audit first. This estimates the minutes from the real replies: their length, and what work they needed (prices, quotes, dates, attachments).'
+      : !n ? 'No replied enquiries in this audit to measure.'
+        : !Mailboxes.connectedCount() ? 'Connect the mailbox to read the replies.'
+          : `Uses the ${Math.min(n, 40)} replied enquir${n === 1 ? 'y' : 'ies'} in this audit${aiStatus.ai ? ', with AI judging what work each reply needed' : ' (word counts only; turn on AI to include prices, quotes and dates)'}.`;
+    const box = $('#estimateBox');
+    if (!estimate) { box.innerHTML = ''; return; }
+    const p = estimate.parts;
+    const share = (k) => Math.round((estimate.notes[k] || 0) / estimate.n * 100);
+    const notes = ['looked up prices', 'worked out a quote', 'checked dates', 'technical answer', 'attached a document', 'mostly a standard reply'].filter((k) => estimate.notes[k]).map((k) => `${k} in ${share(k)}%`);
+    const fromApp = audit && audit.meta && audit.meta.kind === 'checkpoint';
+    box.innerHTML = `<div class="estimate-box">
+      <strong>About ${num(estimate.minutes, 1)} minutes per enquiry</strong> <small class="muted">estimated from ${estimate.n} enquir${estimate.n === 1 ? 'y' : 'ies'}${estimate.usedAi ? ', with AI reading the context' : ', word counts only'}</small>
+      <div class="est-parts">
+        <span>Reading the customer's emails <b>${num(p.reading, 1)} min</b></span>
+        <span>Writing the replies <b>${num(p.writing, 1)} min</b></span>
+        <span>Finding prices, quotes, dates, documents <b>${num(p.lookup, 1)} min</b></span>
+        <span>Opening, sending, switching tasks <b>${num(p.admin, 1)} min</b></span>
+      </div>
+      ${notes.length ? `<p class="hint">Replies that ${notes.join(', ')}.</p>` : ''}
+      ${fromApp ? '<p class="bad">These replies were sent with the enquiry app, so this isn\'t a "before" figure. Run it on the "Before the app" audit.</p>' : ''}
+      <p class="hint">Rates used: reading 240 words a minute, writing 20 words a minute (thinking and typing), +1 min per reply, +2 min for prices, +8 for a worked-out quote, +2 for dates, +2 for a technical answer, +3 for an attachment; standard replies count 30% of the writing time.</p>
+    </div>`;
+  }
+
+  async function estimateMinutes() {
+    if (estimateBusy) return;
+    const all = estimateCandidates();
+    // Up to 40 enquiries, spread across the period.
+    const step = Math.max(1, all.length / 40);
+    const pick = all.length <= 40 ? all : Array.from({ length: 40 }, (_, i) => all[Math.floor(i * step)]);
+    const mailboxes = Mailboxes.forAudit().filter((m) => m.token);
+    estimateBusy = true;
+    renderEstimate();
+    const business = { name: form.businessName.value.trim(), about: form.about.value.trim() };
+    const results = [];
+    let usedAi = false;
+    try {
+      for (let i = 0; i < pick.length; i += 6) {
+        const batch = pick.slice(i, i + 6);
+        $('#estimateMins').innerHTML = `<span class="spinner"></span>Reading replies ${i} of ${pick.length}…`;
+        const r = await api('/api/effort', {
+          business, mailboxes,
+          items: batch.map((e) => ({ id: e.id, ins: e.msgs.filter((m) => m.d === 'in'), outs: e.msgs.filter((m) => m.d === 'out') })),
+        });
+        usedAi = usedAi || r.usedAi;
+        for (const x of r.results || []) {
+          const e = audit.result.enquiries.find((y) => y.id === x.id);
+          if (e) e.effort = { minutes: x.minutes, parts: x.parts, notes: x.notes };
+          results.push(x);
+        }
+      }
+      if (!results.length) throw new Error('none of the replies could be read');
+      const avg = (k) => results.reduce((a, x) => a + x.parts[k], 0) / results.length;
+      const parts = { reading: avg('reading'), writing: avg('writing'), lookup: avg('lookup'), admin: avg('admin') };
+      const notes = {};
+      results.forEach((x) => x.notes.forEach((n) => { notes[n] = (notes[n] || 0) + 1; }));
+      const minutes = results.reduce((a, x) => a + x.minutes, 0) / results.length;
+      estimate = { minutes, parts, n: results.length, usedAi, notes, at: Date.now() };
+      form.minsA.value = String(Math.round(minutes * 2) / 2);
+      setStatus(`Estimated about ${num(minutes, 1)} minutes per enquiry and filled it in. Check it against a stopwatch on a few replies.`, 'ok');
+      if (profileId) saveProfile();
+      if (audit) render();
+    } catch (err) {
+      setStatus(`Couldn't estimate the minutes: ${esc(err.message)}`, 'error');
+    } finally {
+      estimateBusy = false;
+      renderEstimate();
+    }
+  }
+
   // --- Never count -------------------------------------------------------------------
 
   const ignoreList = () => form.ignoreSenders.value.split(/[\n,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -716,6 +807,7 @@
       mailboxes: Mailboxes.snapshot({ tokens }), // passwords are never saved
       otherAddresses: form.otherAddresses.value, ignoreSenders: form.ignoreSenders.value,
       allFolders: form.allFolders.checked,
+      minsAEstimate: estimate,
       customers,
     };
   }
@@ -727,6 +819,8 @@
       form.useAi.checked = false;
       customers = [];
       renderCustomers();
+      estimate = null;
+      renderEstimate();
       defaultDates();
       Mailboxes.load([]);
       syncCompare();
@@ -736,6 +830,8 @@
     if (s.tz) form.tz.value = s.tz;
     form.useAi.checked = Boolean(s.useAi);
     form.allFolders.checked = s.allFolders !== false;
+    estimate = s.minsAEstimate || null;
+    renderEstimate();
     if (Array.isArray(s.customers)) { customers = s.customers.filter((c) => c && c.email); renderCustomers(); }
     form.compare.checked = Boolean(s.compare);
     if (Array.isArray(s.workDays)) $('#workDays').querySelectorAll('input').forEach((i) => { i.checked = s.workDays.includes(Number(i.value)); });
@@ -876,7 +972,7 @@
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
-    const rows = [['Enquiry #', 'Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'AI check', 'Reason not counted / note',
+    const rows = [['Enquiry #', 'Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'Estimated minutes by hand', 'What the replies needed', 'AI check', 'Reason not counted / note',
       ...(texts ? ["Customer's enquiry (email text)", "Business's first reply (email text)", 'Rest of the conversation'] : [])]];
     for (const e of audit.result.enquiries.filter((x) => !countedOnly || x.include).sort((a, b) => a.receivedAt - b.receivedAt)) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
@@ -887,6 +983,7 @@
         e.firstReplyAt ? ((e.firstReplyAt - e.receivedAt) / 3600000).toFixed(2) : '',
         e.firstReplyAt ? (M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000).toFixed(2) : '',
         e.inboundCount, e.outboundCount, M.STATE_LABELS[M.conversationState(e, Date.parse(audit.result.generatedAt) || Date.now())] || '', e.outcome || '', e.existing ? 'yes' : '', e.quality ? e.quality.score : '', e.quality ? e.quality.tip : '',
+        e.effort ? e.effort.minutes : '', e.effort ? e.effort.notes.join('; ') : '',
         e.ai ? `${e.ai.label}: ${e.ai.reason}` : '', e.reason || e.note || '',
         ...(texts ? conversationColumns(e, texts, fmt) : []),
       ]);
@@ -1034,6 +1131,7 @@
       render();
     }));
     scheduleRunSave();
+    renderEstimate();
     resultsEl.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
     resultsEl.querySelectorAll('input[data-id]').forEach((cb) => cb.addEventListener('change', () => {
       const e = r.enquiries.find((x) => x.id === Number(cb.dataset.id));
@@ -1354,7 +1452,7 @@
     ['Arrived out of hours', (m) => num(m.outOfHours), (m) => (m.count ? `${pct(m.outOfHours / m.count)} of enquiries` : '')],
     ['Emails per enquiry', (m) => num(m.avgEmails, 1), () => 'both directions'],
     ['From the website form', (m) => num(m.viaForm), (m) => (m.count ? `${pct(m.viaForm / m.count)} of enquiries` : '')],
-    ['Time spent a month', (m) => (m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`), (m) => (m.minutesPerEnquiry ? `at ${num(m.minutesPerEnquiry, 1)} min an enquiry` : 'enter minutes per enquiry above')],
+    ['Time spent a month', (m) => (m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`), (m) => (m.minutesPerEnquiry ? `at ${num(m.minutesPerEnquiry, 1)} min an enquiry${estimate && !estimate.edited && Number(form.minsA.value) === m.minutesPerEnquiry ? ' (estimated from the emails)' : ''}` : 'enter minutes per enquiry above')],
   ];
 
   function tiles(m) {
