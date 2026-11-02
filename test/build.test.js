@@ -167,3 +167,23 @@ test('records follow-ups and where each email lives', () => {
   assert.strictEqual(e.lastOutboundAt, T0 + 4 * D);
   assert.deepStrictEqual(e.msgs.map((m) => `${m.d}:${m.f}:${m.uid}`), ['in:INBOX:5', 'out:Sent:9', 'out:Sent:10']);
 });
+
+test('records what was decided about every email (for the all-emails download)', () => {
+  const a = inMsg(T0, 'jo@gmail.com', 'Quote', { messageId: '<q1@g>' });
+  const dup = { ...a, mailbox: 'darryn@darryn.co.uk' };
+  const news = inMsg(T0 + H, 'news@shop.com', 'Deals', { headers: { listUnsubscribe: true } });
+  const internal = inMsg(T0 + H, 'darryn@darryn.co.uk', 'Note');
+  const reply = outMsg(T0 + 2 * H, 'jo@gmail.com', 'Re: Quote');
+  const supplier = outMsg(T0 + 3 * H, 'orders@supplier.co.uk', 'Order');
+  const old = inMsg(opts.from - 20 * D, 'old@gmail.com', 'Ancient');
+  const { log } = buildEnquiries([a, dup, news, internal, reply, supplier, old], opts);
+  const by = (subj, kind) => log.filter((l) => l.subject === subj && (!kind || l.kind === kind)).map((l) => l.status);
+  assert.match(by('Quote')[0], /^Counted as enquiry #\d/);
+  assert.match(by('Quote')[1], /^Duplicate/);
+  assert.match(by('Deals')[0], /^Not counted \(enquiry #\d+\): Newsletter/);
+  assert.match(by('Note')[0], /internal/);
+  assert.match(by('Re: Quote')[0], /^Business reply in enquiry #\d+$/);
+  assert.match(by('Order')[0], /not a reply to any enquiry/);
+  assert.match(by('Ancient')[0], /Before the audit period/);
+  assert.strictEqual(log.length, 7);
+});

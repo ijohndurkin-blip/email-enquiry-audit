@@ -375,7 +375,8 @@
         const p = ps[ps.length - 1];
         const stat = periodStats().find((s) => s.p === p) || periodStats().slice(-1)[0];
         const existing = audit.runId || (audit.meta.checkpoint && (runFor(c, audit.meta.checkpoint) || {}).id) || undefined;
-        const result = { ...audit.result, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e) };
+        const { log, ...rest } = audit.result;
+        const result = { ...rest, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e) };
         const row = await storeApi('saveRun', {
           run: {
             id: existing, company_id: c.id, kind: audit.meta.kind, checkpoint: audit.meta.checkpoint || null, label: audit.meta.label,
@@ -747,7 +748,8 @@
   function saveAudit() {
     // The audit file carries no passwords or connection tokens.
     // Email text read for the AI check isn't kept in the file either.
-    const result = { ...audit.result, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e), summary: audit.summary ? { ...audit.summary } : undefined };
+    const { log, ...restResult } = audit.result;
+    const result = { ...restResult, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e), summary: audit.summary ? { ...audit.summary } : undefined };
     download(`${fileBase()}.json`, 'application/json', JSON.stringify({ type: 'enquiry-audit', version: 1, settings: settingsSnapshot(), result }, null, 2));
   }
 
@@ -769,6 +771,88 @@
     } catch (err) {
       setStatus(esc(err.message), 'error');
     }
+  }
+
+  // --- Downloads with email text (read live from the mailbox, straight into the file) -------
+
+  let exportBusy = false;
+  let exportMessage = '';
+  const refKey = (r) => `${String(r.mb).toLowerCase()}|${r.f}|${Number(r.uid)}`;
+  const toCsv = (rows) => `\ufeff${rows.map((r) => r.map((v) => { const x = String(v ?? ''); return /[",\n\r]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; }).join(',')).join('\r\n')}`;
+  const when = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: work().tz }) : '');
+
+  /** Fetch the text of the given emails in batches; returns a map ref -> message. */
+  async function fetchTexts(refs, what) {
+    const mailboxes = Mailboxes.forAudit().filter((m) => m.token);
+    const texts = new Map();
+    const valid = refs.filter((r) => r && r.mb && r.f && r.uid);
+    if (!mailboxes.length) return { texts, note: 'The mailbox isn\'t connected, so the email text was left out.' };
+    const problems = new Set();
+    for (let i = 0; i < valid.length; i += 40) {
+      exportMessage = `<span class="spinner"></span> Reading email text for the ${what} download: ${i} of ${valid.length}…`;
+      render();
+      const batch = valid.slice(i, i + 40);
+      const r = await api('/api/thread', { mailboxes, refs: batch });
+      (r.messages || []).forEach((m, j) => texts.set(refKey(batch[j]), m));
+      (r.problems || []).forEach((p) => problems.add(p));
+    }
+    return { texts, note: [...problems].join(' ') };
+  }
+
+  async function runExport(what, build) {
+    if (exportBusy) return;
+    exportBusy = true;
+    try {
+      const note = await build();
+      exportMessage = `Downloaded the ${what} file.${note ? ` ${esc(note)}` : ''} It contains customers' emails, so keep it private.`;
+    } catch (err) {
+      exportMessage = `<span class="bad">Couldn't make the ${what} download: ${esc(err.message)}</span>`;
+    } finally {
+      exportBusy = false;
+      render();
+    }
+  }
+
+  function exportConversations() {
+    runExport('conversations', async () => {
+      const asOf = Date.parse(audit.result.generatedAt) || Date.now();
+      const list = audit.result.enquiries.slice().sort((a, b) => a.receivedAt - b.receivedAt);
+      const { texts, note } = await fetchTexts(list.flatMap((e) => e.msgs || []), 'conversations');
+      const rows = [['Enquiry #', 'Counted', 'Why not counted', 'Customer name', 'Customer email', 'Existing customer', 'Enquiry subject', 'Where it stands', 'Outcome', 'Email #', 'Date', 'From', 'Sender address', 'Subject', 'Email text', 'Attachments', 'Reply quality (out of 5)', 'Quality tip', 'AI check']];
+      for (const e of list) {
+        const msgs = e.msgs && e.msgs.length ? e.msgs : [{ d: 'in', at: e.receivedAt }];
+        let firstOut = true;
+        msgs.forEach((ref, i) => {
+          const t = ref.uid ? texts.get(refKey(ref)) : null;
+          const isFirstOut = ref.d === 'out' && firstOut;
+          if (ref.d === 'out') firstOut = false;
+          rows.push([
+            e.id, e.include ? 'yes' : 'no', e.include ? '' : (e.reason || 'Unticked by you'), e.customerName, e.customerEmail, e.existing ? 'yes' : '', e.subject,
+            M.STATE_LABELS[M.conversationState(e, asOf)] || '', e.outcome || '',
+            i + 1, when(t && t.date ? Date.parse(t.date) : ref.at), ref.d === 'out' ? 'Business' : 'Customer', t ? t.from : '', t ? t.subject : '',
+            t ? (t.missing ? '(email no longer in the mailbox)' : t.text) : '', t && t.attachments ? t.attachments.join('; ') : '',
+            isFirstOut && e.quality ? e.quality.score : '', isFirstOut && e.quality ? e.quality.tip : '', i === 0 && e.ai ? `${e.ai.label}: ${e.ai.reason}` : '',
+          ]);
+        });
+      }
+      download(`${fileBase()}-conversations.csv`, 'text/csv', toCsv(rows));
+      return note;
+    });
+  }
+
+  function exportAllEmails() {
+    runExport('all emails', async () => {
+      const log = audit.result.log || [];
+      const { texts, note } = await fetchTexts(log, 'all emails');
+      const rows = [['Date', 'Direction', 'Mailbox', 'Folder', 'From name', 'From', 'To', 'Subject', 'What the audit decided', 'Enquiry #', 'Email text', 'Attachments']];
+      for (const l of log) {
+        const t = l.uid ? texts.get(refKey(l)) : null;
+        rows.push([when(l.at), l.kind === 'out' ? 'Sent' : 'Received', l.mb, l.f, l.fromName, l.from, l.to, l.subject, l.status, l.enquiry || '',
+          t ? (t.missing ? '(email no longer in the mailbox)' : t.text) : '', t && t.attachments ? t.attachments.join('; ') : '']);
+      }
+      download(`${fileBase()}-all-emails.csv`, 'text/csv', toCsv(rows));
+      return note;
+    });
   }
 
   function csv() {
@@ -829,7 +913,14 @@
           <p class="sub">${stats.map((s) => `${esc(s.p.label)}: ${range(s.p)}`).join(' · ')} · ${esc(r.mailboxes.filter((m) => m.ok).map((m) => m.email).join(', '))}</p>
         </div>
         <div class="actions no-print">
-          <button type="button" class="secondary" data-act="csv">Download spreadsheet (CSV)</button>
+          <details class="dl-menu">
+            <summary class="button secondary">${exportBusy ? '<span class="spinner"></span>' : ''}Download ▾</summary>
+            <div class="dl-list">
+              <button type="button" data-act="csv"><b>Enquiries summary (CSV)</b><small>One row per enquiry: dates, reply times, status, outcome, quality.</small></button>
+              <button type="button" data-act="csv-convo"${exportBusy ? ' disabled' : ''}><b>Conversations with email text (CSV)</b><small>Every enquiry with each customer email and business reply in full.</small></button>
+              <button type="button" data-act="csv-all"${exportBusy || !audit.result.log ? ' disabled' : ''}><b>All emails with text (CSV)</b><small>${audit.result.log ? 'Every email the audit read, with what it decided about each one. Use it to spot missed enquiries.' : 'Run the audit again to get this (not kept in saved audits).'}</small></button>
+            </div>
+          </details>
           <button type="button" class="secondary" data-act="save">Save audit file</button>
           <button type="button" class="secondary" data-act="print">Print / PDF</button>
           ${audit.withText && aiStatus.ai && !aiBusy && aiCandidates().length ? `<button type="button" class="primary" data-act="ai">Check ${aiCandidates().length} with AI</button>` : ''}
@@ -837,6 +928,7 @@
         </div>
       </div>
       ${aiMessage ? `<p class="ai-status no-print">${aiMessage}</p>` : ''}
+      ${exportMessage ? `<p class="ai-status no-print">${exportMessage}</p>` : ''}
       ${remote && current() && audit.meta ? `<p class="saved-note hint no-print">${audit.runId ? `Saved to ${esc(current().name)} as "${esc(audit.meta.label)}".` : 'Saving…'}</p>` : ''}
       ${stats.length > 1 && stats[0].saved ? `<p class="hint">Compared with the saved "Before" audit (${esc(range(stats[0].p))}).</p>` : ''}
       <nav class="views no-print" role="tablist" aria-label="Results">
@@ -863,7 +955,11 @@
       <p class="method">How this is counted: an enquiry is a conversation with one customer email address (website-form emails are credited to the customer's address). A customer who writes again after 14 quiet days starts a new enquiry. Reply time runs from their first email to the first email the business sent back to that address from any audited mailbox. Newsletters, receipts, notifications, auto-replies and bounces are left out unless the business replied to them. Replies by phone can't be seen, so "No reply found" may include some enquiries that were phoned back.</p>
     `;
     resultsEl.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
+      const menu = b.closest('details.dl-menu');
+      if (menu) menu.open = false;
       if (b.dataset.act === 'csv') csv();
+      if (b.dataset.act === 'csv-convo') exportConversations();
+      if (b.dataset.act === 'csv-all') exportAllEmails();
       if (b.dataset.act === 'save') saveAudit();
       if (b.dataset.act === 'print') window.print();
       if (b.dataset.act === 'ai') aiSort();

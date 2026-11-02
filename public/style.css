@@ -372,3 +372,15 @@ select.outcome { width: auto; margin: 0; padding: 4px 6px; font-size: 13px; }
 .quality-box li.no b { color: var(--bad); }
 .quality-box li.no { color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Download menu */
+.dl-menu { position: relative; }
+.dl-menu summary { list-style: none; cursor: pointer; }
+.dl-menu summary::-webkit-details-marker { display: none; }
+.dl-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: min(340px, 90vw); background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.18); padding: 6px; display: grid; gap: 2px; }
+.dl-list button { text-align: left; background: none; border: 0; border-radius: 8px; padding: 8px 10px; color: var(--text); }
+.dl-list button:hover:not(:disabled) { background: var(--accent-soft); }
+.dl-list button:disabled { opacity: .55; cursor: not-allowed; }
+.dl-list b { display: block; color: var(--heading); font-size: 14px; }
+.dl-list small { display: block; font-size: 12.5px; }
+@media (max-width: 600px) { .dl-list { right: auto; left: 0; } }

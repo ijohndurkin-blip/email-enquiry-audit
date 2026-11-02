@@ -52,7 +52,7 @@ module.exports = async function handler(req, res) {
   if (!mailboxes.some((m) => m.ok)) return send(res, 422, { error: 'Couldn\'t read any of the mailboxes.', mailboxes });
 
   const messages = results.flatMap((r) => (r.status === 'fulfilled' ? r.value.messages : []));
-  const { enquiries, stats } = buildEnquiries(messages, {
+  const { enquiries, stats, log } = buildEnquiries(messages, {
     from, to,
     mailboxes: accounts.map((a) => a.email),
     otherAddresses: String(body.otherAddresses || '').split(/[\s,;]+/).filter(Boolean),
@@ -65,5 +65,6 @@ module.exports = async function handler(req, res) {
     mailboxes,
     stats,
     enquiries,
+    log, // what was decided about every email read (for the "all emails" download)
   });
 };

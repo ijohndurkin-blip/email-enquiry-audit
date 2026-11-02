@@ -89,6 +89,18 @@ Results open in three tabs, written for business owners rather than analysts. **
   Each chart has a one-line takeaway, numbers on the bars, details when you hover over a bar, and a "Show the numbers" table. When comparing periods, "Before" is blue and "After" is cyan. These colours were checked so people with colour blindness can tell them apart, in both light and dark mode.
 - **Enquiries:** the Counted and Not counted lists, with ticking and "Never count…".
 
+## Downloads
+
+The **Download** menu above the results has three files:
+
+| File | What's in it |
+|---|---|
+| **Enquiries summary (CSV)** | One row per enquiry: dates, reply times, where it stands, outcome, reply quality, AI check, reason if not counted. |
+| **Conversations with email text (CSV)** | Every enquiry (counted and not), one row per email in it: customer emails and business replies **with their full text**, plus the quality score and tip on the first reply. Use it to check the scoring and see what's really being said. |
+| **All emails with text (CSV)** | **Every email the audit read**, received and sent, with its full text and **what the audit decided about it**. For example: counted as enquiry #12, not counted (newsletter, receipt…), customer follow-up, business reply, duplicate, internal, sent but not a reply to any enquiry, or before the period. Filter on "What the audit decided" to spot enquiries the tool missed. |
+
+Email text is read live from the mailbox, read-only, when you download, and goes straight into the file. It isn't saved anywhere else, so the files contain customers' emails and should be kept private. The two text downloads need the mailbox to be connected. "All emails" is only available straight after running an audit, because the per-email list isn't kept in saved audits.
+
 ## Quality of replies (AI, optional)
 
 With AI turned on, each counted enquiry's **first reply from the business** is checked against five plain questions:
