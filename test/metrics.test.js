@@ -43,3 +43,12 @@ test('compute works out medians, rates and time spent', () => {
   assert.strictEqual(M.duration(0.5), '30 min');
   assert.strictEqual(M.duration(3), '3 hrs');
 });
+
+test('reply buckets and weekly counts', () => {
+  const t = london(2026, 10, 5, 10); // Monday
+  const e = (start, h) => ({ receivedAt: start, firstReplyAt: h == null ? null : start + h * H });
+  const b = M.replyBuckets([e(t, 0.5), e(t, 3), e(t, 30), e(t, 100), e(t, null), { receivedAt: t, replyMatchable: false }]);
+  assert.deepStrictEqual(b.map((x) => x.count), [1, 1, 0, 1, 1, 1]);
+  const w = M.weekly([e(t, 1), e(t + 24 * H, 1), e(t + 8 * 24 * H, 1)], london(2026, 10, 1, 0), london(2026, 10, 15, 0), 'Europe/London');
+  assert.deepStrictEqual(w.map((x) => x.count), [0, 2, 1]); // weeks of 28 Sep, 5 Oct, 12 Oct
+});

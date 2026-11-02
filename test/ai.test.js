@@ -67,3 +67,18 @@ test('too many emails in one request is refused', async () => {
   const many = Array.from({ length: 21 }, (_, i) => ({ id: i + 1, subject: 's' }));
   assert.strictEqual((await call(classifyApi, { items: many })).status, 400);
 });
+
+test('summary sends only numbers and returns plain-English parts', async () => {
+  process.env.ANTHROPIC_API_KEY = 'sk-test';
+  ai._setClient({ beta: { messages: { create: async (req) => {
+    lastRequest = req;
+    return { model: req.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ headline: 'Replies are quick.', going_well: ['Fast'], needs_attention: [], suggestions: ['Add an auto-reply', 'b', 'c', 'd'] }) }] };
+  } } } });
+  const summaryApi = require('../api/summary');
+  const r = await call(summaryApi, { business: { name: 'Biz' }, stats: { periods: [{ label: 'Before', enquiries: 40, typicalReplyHours: 6 }] } });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.headline, 'Replies are quick.');
+  assert.strictEqual(r.body.suggestions.length, 3);
+  assert.match(lastRequest.messages[0].content, /"enquiries":40/);
+  assert.match(lastRequest.system, /never say "median"/i);
+});

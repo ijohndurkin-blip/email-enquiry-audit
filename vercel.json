@@ -2,7 +2,8 @@
   "functions": {
     "api/audit.js": { "maxDuration": 60 },
     "api/connect.js": { "maxDuration": 60 },
-    "api/classify.js": { "maxDuration": 60 }
+    "api/classify.js": { "maxDuration": 60 },
+    "api/summary.js": { "maxDuration": 60 }
   },
   "headers": [
     {

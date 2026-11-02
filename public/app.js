@@ -1,4 +1,4 @@
-/* global EnquiryMetrics, Mailboxes */
+/* global EnquiryMetrics, Mailboxes, EnquiryCharts */
 (function () {
   const M = EnquiryMetrics;
   const DAY = 86400000;
@@ -231,7 +231,7 @@
   async function aiSort() {
     if (aiBusy || !audit) return;
     const todo = aiCandidates();
-    if (!todo.length) { aiMessage = 'AI check: nothing left to check.'; render(); return; }
+    if (!todo.length) { aiMessage = ''; render(); writeSummary(); return; }
     aiBusy = true;
     const business = { name: form.businessName.value.trim(), about: form.about.value.trim() };
     const BATCH = 15;
@@ -261,7 +261,8 @@
         }
         done += batch.length;
       }
-      aiMessage = `AI checked ${done} email${done === 1 ? '' : 's'} and moved ${moved} to Not counted. Check the Not counted tab and tick any it got wrong.`;
+      aiMessage = `AI checked ${done} email${done === 1 ? '' : 's'} and moved ${moved} to Not counted. Check the Enquiries tab (Not counted) and tick any it got wrong.`;
+      writeSummary();
     } catch (err) {
       aiMessage = `<span class="bad">${esc(err.message)}</span> The ${done} checked so far are kept; press "Check with AI" to try the rest.`;
     } finally {
@@ -356,7 +357,7 @@
   function saveAudit() {
     // The audit file carries no passwords or connection tokens.
     // Email text read for the AI check isn't kept in the file either.
-    const result = { ...audit.result, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e) };
+    const result = { ...audit.result, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e), summary: audit.summary ? { ...audit.summary } : undefined };
     download(`${fileBase()}.json`, 'application/json', JSON.stringify({ type: 'enquiry-audit', version: 1, settings: settingsSnapshot(), result }, null, 2));
   }
 
@@ -371,7 +372,7 @@
       // Keep this browser's saved connections if the file is for the business that's open.
       if (Mailboxes.connectedCount()) delete s.mailboxes;
       applySettings(s);
-      audit = { result: data.result };
+      audit = { result: data.result, summary: data.result.summary || null };
       aiMessage = '';
       setStatus(`Opened the audit saved on ${new Date(data.result.generatedAt).toLocaleString('en-GB')}.`, 'ok');
       render();
@@ -402,21 +403,31 @@
 
   // --- Results -------------------------------------------------------------------
 
+  const SITE = 'https://www.raresquaredlabs.co.uk';
+  let view = 'summary'; // results tab: summary | charts | list
+
+  function periodStats() {
+    const r = audit.result;
+    const w = work();
+    return periods().map((p) => {
+      const list = r.enquiries.filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
+      return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }) };
+    });
+  }
+
   function render() {
     const r = audit.result;
     const w = work();
     const ps = periods();
-    const stats = ps.map((p) => ({
-      p,
-      m: M.compute(r.enquiries.filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to), { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }),
-    }));
+    const stats = periodStats();
     const fmtDay = (t) => new Date(t).toLocaleDateString('en-GB', { timeZone: w.tz, day: 'numeric', month: 'short', year: 'numeric' });
     const range = (p) => `${fmtDay(p.from)} – ${fmtDay(p.to - 1)}`;
     const name = form.businessName.value.trim();
+    const counted = r.enquiries.filter((e) => e.include).length;
 
     resultsEl.hidden = false;
     resultsEl.innerHTML = `
-      <div class="report-brand"><img src="logo.png" alt="Rare Squared Labs"><span>Enquiry audit by Rare Squared Labs</span></div>
+      <div class="report-brand"><a href="${SITE}" target="_blank" rel="noopener"><img src="logo.png" alt="Rare Squared Labs"></a><span>Enquiry audit by <a href="${SITE}" target="_blank" rel="noopener">Rare Squared Labs</a></span></div>
       <div class="results-head">
         <div>
           <h2>${esc(name ? `${name}: enquiry audit` : 'Enquiry audit')}</h2>
@@ -430,23 +441,35 @@
         </div>
       </div>
       ${aiMessage ? `<p class="ai-status no-print">${aiMessage}</p>` : ''}
-      ${mailboxNotes(r)}
-      ${stats.length === 1 ? tiles(stats[0].m) : compareTable(stats)}
-      <div class="card story"><h3>For the case study</h3>${stats.map((s) => `<p>${story(s, name, range)}</p>`).join('')}${savingLine(stats)}</div>
-      <div class="grid2">
-        ${bars('When enquiries arrive: day of week', [1, 2, 3, 4, 5, 6, 0].map((d) => [DAYS[d], stats[0].m.byWeekday[d]]))}
-        ${bars('When enquiries arrive: hour of day', stats[0].m.byHour.map((n, h) => [h % 3 ? '' : String(h).padStart(2, '0'), n, `${String(h).padStart(2, '0')}:00`]), true)}
-      </div>
-      ${table(r, ps, w)}
-      <p class="report-foot">Prepared by Rare Squared Labs · ${esc(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</p>
-      <p class="method">How this is counted: an enquiry is a conversation with one customer email address (website-form emails are credited to the address in Reply-To). A customer who writes again after ${14} quiet days starts a new enquiry. Reply time runs from their first email to the first email the business sent back to that address from any audited mailbox. Newsletters, receipts, notifications, auto-replies and bounces are left out unless the business replied to them. Replies by phone can't be seen, so "No reply found" may include some enquiries that were phoned back.</p>
+      <nav class="views no-print" role="tablist" aria-label="Results">
+        ${[['summary', 'Summary'], ['charts', 'Charts'], ['list', `Enquiries (${counted})`]].map(([k, label]) => `<button type="button" role="tab" aria-selected="${view === k}" data-view="${k}" class="${view === k ? 'on' : ''}">${label}</button>`).join('')}
+      </nav>
+      <section class="panel${view === 'summary' ? '' : ' screen-hidden'}" data-panel="summary">
+        ${mailboxNotes(r)}
+        ${glance(stats)}
+        ${summaryCard(stats)}
+        ${stats.length === 1 ? tiles(stats[0].m) : compareTable(stats)}
+        <div class="card story"><h3>For the case study</h3>${stats.map((s) => `<p>${story(s, name, range)}</p>`).join('')}${savingLine(stats)}</div>
+      </section>
+      <section class="panel${view === 'charts' ? '' : ' screen-hidden'}" data-panel="charts">
+        <h2 class="print-only">Charts</h2>
+        ${chartsHtml(stats, w)}
+      </section>
+      <section class="panel${view === 'list' ? '' : ' screen-hidden'}" data-panel="list">
+        <h2 class="print-only">The enquiries</h2>
+        ${table(r, ps, w)}
+      </section>
+      <p class="report-foot">Prepared by Rare Squared Labs · <a href="${SITE}" target="_blank" rel="noopener">www.raresquaredlabs.co.uk</a> · ${esc(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</p>
+      <p class="method">How this is counted: an enquiry is a conversation with one customer email address (website-form emails are credited to the customer's address). A customer who writes again after 14 quiet days starts a new enquiry. Reply time runs from their first email to the first email the business sent back to that address from any audited mailbox. Newsletters, receipts, notifications, auto-replies and bounces are left out unless the business replied to them. Replies by phone can't be seen, so "No reply found" may include some enquiries that were phoned back.</p>
     `;
     resultsEl.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.act === 'csv') csv();
       if (b.dataset.act === 'save') saveAudit();
       if (b.dataset.act === 'print') window.print();
       if (b.dataset.act === 'ai') aiSort();
+      if (b.dataset.act === 'summary') writeSummary();
     }));
+    resultsEl.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => { view = b.dataset.view; render(); }));
     resultsEl.querySelectorAll('[data-never]').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.never === 'open') { neverOpen = Number(b.dataset.id); render(); return; }
       if (b.dataset.never === 'cancel') { neverOpen = null; render(); return; }
@@ -460,6 +483,167 @@
       e.manual = cb.checked; // your choice always wins over the rules and the AI
       render();
     }));
+  }
+
+  // --- "At a glance": plain-English checks with a status (icon + words, never colour alone) ----
+
+  const STATUS = {
+    good: { icon: '✓', word: 'Good' },
+    warn: { icon: '!', word: 'Could be better' },
+    bad: { icon: '✕', word: 'Needs attention' },
+    info: { icon: 'i', word: 'Worth knowing' },
+  };
+
+  function checks(m) {
+    const out = [];
+    if (!m.count) return out;
+    const wh = m.medianWorkingReplyHours;
+    if (wh != null) {
+      const s = wh <= 1 ? 'good' : wh <= 4 ? 'warn' : 'bad';
+      const clock = m.medianReplyHours;
+      const extra = clock != null && Math.abs(clock - wh) > 0.25 ? ` Counting only your opening hours, that's ${M.duration(wh)}.` : '';
+      out.push({ s, title: 'How quickly enquiries get a reply', text: `Half of enquiries got a reply within ${M.duration(clock)}.${extra} ${s === 'good' ? 'That\'s quick.' : s === 'warn' ? 'Customers often go with whoever replies first, so faster is better.' : 'Customers often book whoever replies first, so slow replies can lose work.'}` });
+    }
+    if (m.replied + m.unreplied > 0) {
+      const share = m.unreplied / (m.replied + m.unreplied);
+      const s = m.unreplied === 0 ? 'good' : share <= 0.1 ? 'warn' : 'bad';
+      out.push({ s, title: 'Enquiries without a reply', text: m.unreplied === 0 ? 'Every enquiry got an email reply.' : `${m.unreplied} of ${m.replied + m.unreplied} enquiries got no email reply that we could see. Some may have been phoned back, but each one could be a lost job.` });
+    }
+    if (m.count) {
+      const share = m.outOfHours / m.count;
+      out.push({ s: share >= 0.25 ? 'info' : 'good', title: 'Enquiries that arrive when you\'re closed', text: share >= 0.25 ? `About ${Math.round(share * 10)} in 10 enquiries arrive evenings or weekends. An automatic first reply would let those customers know they've been heard.` : `Most enquiries arrive during opening hours (${m.count - m.outOfHours} of ${m.count}).` });
+    }
+    if (m.avgEmails != null) {
+      out.push({ s: m.avgEmails >= 4 ? 'warn' : 'good', title: 'Back-and-forth emails', text: m.avgEmails >= 4 ? `Each enquiry takes about ${num(m.avgEmails)} emails in total. Asking for details like phone number, address and photos in the first reply can cut this down.` : `Enquiries are sorted in about ${num(m.avgEmails)} emails each, which is efficient.` });
+    }
+    return out;
+  }
+
+  function glance(stats) {
+    const latest = stats[stats.length - 1];
+    const list = checks(latest.m);
+    if (!list.length) return '<div class="card"><h3>At a glance</h3><p>No enquiries were found in this period.</p></div>';
+    return `<div class="card glance">
+      <h3>At a glance${stats.length > 1 ? ` <small>(${esc(latest.p.label)} period)</small>` : ''}</h3>
+      ${latest.m.count < 10 ? `<p class="hint">Only ${latest.m.count} enquir${latest.m.count === 1 ? 'y' : 'ies'} in this period, so treat these as a rough guide.</p>` : ''}
+      <ul class="checks">${list.map((c) => `<li class="check-item ck-${c.s}"><span class="badge ${c.s}"><b aria-hidden="true">${STATUS[c.s].icon}</b>${STATUS[c.s].word}</span><div><strong>${esc(c.title)}</strong><p>${esc(c.text)}</p></div></li>`).join('')}</ul>
+    </div>`;
+  }
+
+  // --- AI summary (numbers only) -------------------------------------------------------------
+
+  function summaryStats(stats) {
+    const w = work();
+    const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
+    const pc = (x) => (x == null ? null : Math.round(x * 100));
+    const busiest = (arr, names) => { const max = Math.max(...arr); return max ? names[arr.indexOf(max)] : null; };
+    return {
+      openingHours: `${w.workStart}–${w.workEnd}, ${w.workDays.map((d) => DAYS[d]).join(' ')}`,
+      periods: stats.map(({ p, m }) => ({
+        label: p.label, days: Math.round(m.days), enquiries: m.count, enquiriesPerMonth: r1(m.perMonth),
+        typicalReplyHoursClock: r1(m.medianReplyHours), typicalReplyHoursOpeningHours: r1(m.medianWorkingReplyHours),
+        repliedWithin1HourPct: pc(m.within1h), repliedWithin24HoursPct: pc(m.within24h), slowestReplyHours: r1(m.slowest),
+        noEmailReplyFound: m.unreplied, websiteFormsWithoutCustomerAddress: m.unmatchable,
+        arrivedOutOfHours: m.outOfHours, emailsPerEnquiry: r1(m.avgEmails), viaWebsiteForm: m.viaForm,
+        busiestDay: busiest(m.byWeekday, DAYS), busiestHour: busiest(m.byHour, m.byHour.map((_, h) => `${h}:00`)),
+        minutesPerEnquiry: m.minutesPerEnquiry, hoursPerMonthOnEnquiries: r1(m.hoursPerMonth),
+      })),
+    };
+  }
+
+  async function writeSummary() {
+    if (!audit || audit.summaryBusy) return;
+    const stats = summaryStats(periodStats());
+    audit.summaryBusy = true;
+    audit.summaryError = null;
+    render();
+    try {
+      const r = await api('/api/summary', { business: { name: form.businessName.value.trim(), about: form.about.value.trim() }, stats });
+      audit.summary = { ...r, key: JSON.stringify(stats), at: Date.now() };
+    } catch (err) {
+      audit.summaryError = err.message;
+    } finally {
+      audit.summaryBusy = false;
+      render();
+    }
+  }
+
+  function summaryCard(stats) {
+    const s = audit.summary;
+    if (!aiStatus.ai && !s) return '';
+    const stale = s && s.key !== JSON.stringify(summaryStats(stats));
+    const button = (label) => `<button type="button" class="${s ? 'secondary' : 'primary'} small no-print" data-act="summary">${label}</button>`;
+    if (audit.summaryBusy) return '<div class="card ai-summary"><h3>In plain English</h3><p><span class="spinner"></span> Writing a summary…</p></div>';
+    if (!s) {
+      return `<div class="card ai-summary no-print"><h3>In plain English</h3>
+        <p class="hint">Get a short summary of what these numbers mean and what could help, written by AI. Only the totals above are sent, not any emails.</p>
+        ${audit.summaryError ? `<p class="bad">${esc(audit.summaryError)}</p>` : ''}${button('Write a summary')}</div>`;
+    }
+    const part = (title, items, cls) => (items && items.length ? `<div class="sum-part ${cls}"><h4>${title}</h4><ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '');
+    return `<div class="card ai-summary">
+      <h3>In plain English <small class="muted">written by AI from the numbers in this report</small></h3>
+      <p class="sum-headline">${esc(s.headline)}</p>
+      <div class="sum-grid">
+        ${part('What\'s going well', s.goingWell, 'sum-good')}
+        ${part('What needs attention', s.needsAttention, 'sum-warn')}
+        ${part('What could help', s.suggestions, 'sum-tip')}
+      </div>
+      ${stale ? `<p class="hint no-print">The numbers have changed since this was written. ${button('Update summary')}</p>` : `<p class="no-print">${button('Rewrite')}</p>`}
+      ${audit.summaryError ? `<p class="bad no-print">${esc(audit.summaryError)}</p>` : ''}
+    </div>`;
+  }
+
+  // --- Charts tab --------------------------------------------------------------------------
+
+  function chartsHtml(stats, w) {
+    const C = EnquiryCharts;
+    const compare = stats.length > 1;
+    const series = compare ? stats.map((s, i) => ({ name: s.p.label, cls: i ? 'after' : 'before' })) : [{ name: stats[0].p.label, cls: 'after' }];
+    const pctOf = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : '–');
+    const total = (s) => s.m.replied + s.m.unreplied;
+    if (!stats.some((s) => s.m.count)) return '<div class="card"><p>No enquiries to chart in this period.</p></div>';
+
+    // 1. Reply speed
+    const buckets = stats.map((s) => M.replyBuckets(s.list));
+    const speedRows = M.BUCKETS.map((b, i) => ({ label: b.label, values: buckets.map((bs) => bs[i].count) }));
+    const speedTake = compare
+      ? `Replied within an hour: <b>${pctOf(buckets[0][0].count, total(stats[0]))}</b> before, <b>${pctOf(buckets[1][0].count, total(stats[1]))}</b> after.`
+      : `<b>${buckets[0][0].count} of ${total(stats[0])}</b> enquiries got a reply within an hour${buckets[0][5].count ? `, and <b>${buckets[0][5].count}</b> got no email reply` : ''}.`;
+
+    // 2. Enquiries each week (bars take their period's colour)
+    const from = Math.min(...stats.map((s) => s.p.from));
+    const to = Math.max(...stats.map((s) => s.p.to));
+    const all = stats.flatMap((s) => s.list.map((e) => ({ ...e, _p: s.p.label })));
+    const weeks = M.weekly(all, from, to, w.tz);
+    const periodOf = (t) => stats.findIndex((s) => t + 3.5 * DAY >= s.p.from && t + 3.5 * DAY < s.p.to);
+    const weekRows = weeks.map((wk) => {
+      const d = new Date(wk.start);
+      const lab = d.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+      const pi = periodOf(wk.start);
+      return { label: `Week of ${lab}`, short: lab, values: [wk.count], cls: compare ? (pi > 0 ? 'after' : 'before') : 'after' };
+    });
+    const busiestWeek = weekRows.reduce((a, b) => (b.values[0] > a.values[0] ? b : a), weekRows[0]);
+
+    // 3. Day of week, 4. hour of day
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    const dayRows = order.map((d) => ({ label: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d], short: DAYS[d], values: stats.map((s) => s.m.byWeekday[d]), shade: w.workDays.includes(d) }));
+    const dayTotals = order.map((d) => stats.reduce((n, s) => n + s.m.byWeekday[d], 0));
+    const topDay = dayRows[dayTotals.indexOf(Math.max(...dayTotals))];
+    const [sh] = w.workStart.split(':').map(Number);
+    const [eh, em] = w.workEnd.split(':').map(Number);
+    const hourRows = Array.from({ length: 24 }, (_, h) => ({ label: `${String(h).padStart(2, '0')}:00 to ${String((h + 1) % 24).padStart(2, '0')}:00`, short: String(h).padStart(2, '0'), values: stats.map((s) => s.m.byHour[h]), shade: h >= sh && (h < eh || (h === eh && em > 0)) }));
+    const latest = stats[stats.length - 1].m;
+
+    // 5. How enquiries arrive
+    const splitRows = stats.map((s) => ({ label: s.p.label, parts: [{ name: 'Email', value: s.m.count - s.m.viaForm, cls: 'before' }, { name: 'Website form', value: s.m.viaForm, cls: 'after' }] }));
+
+    return `<div class="charts-grid">
+      ${C.hbar({ title: 'How quickly did enquiries get a reply?', takeaway: speedTake, rows: speedRows, series })}
+      ${C.vbar({ title: 'Which days do enquiries arrive?', takeaway: topDay ? `<b>${esc(topDay.label)}</b> is the busiest day.` : '', rows: dayRows, series, shadeLabel: 'Shaded = days you\'re open' })}
+      ${C.vbar({ title: 'How many enquiries came in each week?', takeaway: busiestWeek && busiestWeek.values[0] ? `The busiest was <b>the ${esc(busiestWeek.label.replace(/^Week/, 'week'))}</b>, with ${busiestWeek.values[0]} enquiries.` : '', rows: weekRows, series: [{ name: 'Enquiries', cls: 'after' }], legendSeries: compare ? series : [], wide: true })}
+      ${C.vbar({ title: 'What time do enquiries arrive?', takeaway: latest.count ? `<b>${Math.round((latest.outOfHours / latest.count) * 10)} in 10</b> arrive when you're closed${compare ? ' (after)' : ''}.` : '', rows: hourRows, series, labelEvery: 3, shadeLabel: `Shaded = opening hours (${w.workStart}–${w.workEnd})`, wide: true })}
+      ${C.split({ title: 'How do enquiries arrive?', takeaway: `${pctOf(latest.viaForm, latest.count)} came through the website form${compare ? ' (after)' : ''}; the rest were emailed directly.`, rows: splitRows, wide: true })}
+    </div>`;
   }
 
   function mailboxNotes(r) {
@@ -508,10 +692,14 @@
       if (x === y) return '<span class="same">no change</span>';
       const better = lowerIsBetter ? y < x : y > x;
       let txt;
-      if (label.startsWith('Replied') || label === 'No reply found') txt = `${y > x ? '+' : '−'}${Math.round(Math.abs(y - x) * 100)} pts`;
-      else if (label === 'Time spent a month') txt = `${y < x ? '−' : '+'}${num(Math.abs(x - y), 1)} hrs`;
-      else if (lowerIsBetter && y > 0 && x / y >= 2) txt = `${num(x / y, 1)}× faster`;
-      else txt = `${y < x ? '−' : '+'}${Math.round(Math.abs(1 - y / (x || 1)) * 100)}%`;
+      if (label.startsWith('Replied') || label === 'No reply found') {
+        const d = Math.abs(y - x) * 100;
+        txt = d < 2 ? (better ? 'about the same' : 'about the same') : `${d >= 20 ? 'much ' : ''}${better ? 'better' : 'worse'}`;
+        if (d < 2) return '<span class="same">about the same</span>';
+      } else if (label === 'Time spent a month') txt = `${num(Math.abs(x - y), 1)} hrs ${y < x ? 'less' : 'more'}`;
+      else if (lowerIsBetter && y < 0.05) txt = 'almost instant now';
+      else if (lowerIsBetter && y > 0 && x / y >= 2) txt = `${num(x / y, x / y >= 10 ? 0 : 1)}× faster`;
+      else txt = `${Math.round(Math.abs(1 - y / (x || 1)) * 100)}% ${y < x ? (lowerIsBetter ? 'faster' : 'lower') : (lowerIsBetter ? 'slower' : 'higher')}`;
       return `<span class="${better ? 'good' : 'bad'}">${txt}</span>`;
     };
     return `<div class="card"><table class="compare">
@@ -539,11 +727,6 @@
     // Time saved on the enquiries that actually came in after: old minutes vs new minutes each.
     const saved = (b.m.perMonth * (a.m.minutesPerEnquiry - b.m.minutesPerEnquiry)) / 60;
     return `<p class="headline">${saved >= 0 ? `About <b>${num(saved, 1)} hours a month saved</b>` : `About ${num(-saved, 1)} hours a month more`} on enquiries (${num(b.m.perMonth)} enquiries a month at ${num(b.m.minutesPerEnquiry, 1)} min each instead of ${num(a.m.minutesPerEnquiry, 1)})${a.m.medianReplyHours && b.m.medianReplyHours ? `, with typical replies going from ${M.duration(a.m.medianReplyHours)} to ${M.duration(b.m.medianReplyHours)}` : ''}.</p>`;
-  }
-
-  function bars(title, data, compact) {
-    const max = Math.max(1, ...data.map((d) => d[1]));
-    return `<div class="card"><h3>${title}</h3><div class="bars${compact ? ' compact' : ''}">${data.map(([label, n, full]) => `<div class="bar" style="--h:${(n / max) * 100}%" title="${esc(full || label)}: ${n}"><div class="fill" style="height:${(n / max) * 100}%"></div><span class="n">${n || ''}</span><span class="l">${esc(label)}</span></div>`).join('')}</div></div>`;
   }
 
   function table(r, ps, w) {
@@ -598,5 +781,6 @@
       <button type="button" class="link small" data-never="cancel">Cancel</button></div>`;
   }
 
+  EnquiryCharts.initTooltips();
   initForm();
 }());

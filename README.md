@@ -47,6 +47,23 @@ The audit function is allowed to run for up to 60 seconds (`vercel.json`). Two m
 
 Save the "before" audit file straight away. If the business later deletes or archives old emails, re-running the before period won't give the same numbers.
 
+## The results
+
+Results open in three tabs, written for business owners rather than analysts. **Print / PDF** prints all three in order, with your logo, a link to www.raresquaredlabs.co.uk and a dated footer.
+
+- **Summary**
+  - **At a glance:** four checks, each with a plain-English verdict: Good, Could be better, Needs attention, or Worth knowing. They cover reply speed, enquiries without a reply, enquiries arriving when closed, and back-and-forth emails. These are worked out from the numbers, so they don't need AI.
+  - **In plain English (AI, optional):** a headline, "What's going well", "What needs attention" and "What could help". **Only the totals and percentages are sent to the AI**, never emails, names or addresses. It's written automatically after an AI-sorted audit, or with the **Write a summary** button. If you tick or untick enquiries afterwards, it offers to update.
+  - The before/after table, the case-study paragraph and hours saved.
+- **Charts**
+  - how quickly enquiries got a reply
+  - which days and what times enquiries arrive, with opening hours shaded
+  - enquiries each week
+  - website form versus direct email
+
+  Each chart has a one-line takeaway, numbers on the bars, details when you hover over a bar, and a "Show the numbers" table. When comparing periods, "Before" is blue and "After" is cyan. These colours were checked so people with colour blindness can tell them apart, in both light and dark mode.
+- **Enquiries:** the Counted and Not counted lists, with ticking and "Never count…".
+
 ## Telling real enquiries from other mail
 
 Automated mail (newsletters, notifications, receipts, no-reply senders, account emails) is filtered by rules. Emails from real people about something else, such as suppliers, the accountant or friends, look like enquiries to the rules. Three tools deal with them:
@@ -116,7 +133,9 @@ AUDIT_ACCESS_KEY=test npm run dev      # http://localhost:3000
 | `api/connect.js` | Vercel function: tests a mailbox and returns an encrypted saved-connection token |
 | `api/audit.js` | Vercel function: checks the access key, reads the mailboxes, builds the enquiries |
 | `api/status.js` / `api/classify.js` | Reports whether AI sorting is on / sorts a batch of up to 20 emails with Claude |
-| `lib/ai.js` | The AI prompt, categories and JSON-schema structured output |
+| `lib/ai.js` | The AI prompts (sorting and plain-English summary) with JSON-schema structured output |
+| `api/summary.js` | Writes the plain-English summary from the audit totals (no email content) |
+| `public/charts.js` | The charts, in plain HTML/CSS with no library, so they print cleanly |
 | `lib/secret.js` | Encrypts and decrypts saved connections (AES-256-GCM) |
 | `public/mailboxes.js` | Mailbox cards: test connection, saved connections, Sent folder choice |
 | `lib/discover.js` | Finds IMAP settings from an email address (ported from the enquiry app); certificate-name retry, STARTTLS on port 143, lockout-safe sign-in |

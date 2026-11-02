@@ -128,5 +128,41 @@
     return `${Math.round(h / 24 * 10) / 10} days`;
   }
 
-  return { compute, workingMs, localParts, localToUtc, median, duration };
+  /** How long each enquiry waited for a first reply, in plain-English groups. */
+  const BUCKETS = [
+    { key: 'h1', label: 'Within an hour', max: 1 },
+    { key: 'h4', label: '1 to 4 hours', max: 4 },
+    { key: 'd1', label: '4 to 24 hours', max: 24 },
+    { key: 'd2', label: '1 to 2 days', max: 48 },
+    { key: 'more', label: 'More than 2 days', max: Infinity },
+    { key: 'none', label: 'No reply found' },
+  ];
+  function replyBuckets(enquiries) {
+    const counts = Object.fromEntries(BUCKETS.map((b) => [b.key, 0]));
+    for (const e of enquiries) {
+      if (e.replyMatchable === false) continue;
+      if (!e.firstReplyAt) { counts.none += 1; continue; }
+      const h = (e.firstReplyAt - e.receivedAt) / HOUR;
+      counts[BUCKETS.find((b) => b.max != null && h <= b.max).key] += 1;
+    }
+    return BUCKETS.map((b) => ({ ...b, count: counts[b.key] }));
+  }
+
+  /** Enquiries per week (weeks start on Monday, in the business's time zone). */
+  function weekly(enquiries, from, to, tz) {
+    const weekStart = (t) => {
+      const p = localParts(t, tz);
+      const back = (p.wd + 6) % 7; // days since Monday
+      return Date.UTC(p.y, p.m - 1, p.d - back);
+    };
+    const weeks = [];
+    for (let w = weekStart(from); w <= weekStart(to - 1); w += 7 * DAY) weeks.push({ start: w, count: 0 });
+    for (const e of enquiries) {
+      const w = weeks.find((x) => x.start === weekStart(e.receivedAt));
+      if (w) w.count += 1;
+    }
+    return weeks;
+  }
+
+  return { compute, workingMs, localParts, localToUtc, median, duration, replyBuckets, weekly, BUCKETS };
 }));
