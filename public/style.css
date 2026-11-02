@@ -331,3 +331,6 @@ table.mini .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
   .check-row { grid-template-columns: 1fr; }
   .cr-actions { justify-content: flex-start; }
 }
+
+.setup-steps { margin: 6px 0 0; padding-left: 20px; }
+.setup-steps li { margin-bottom: 6px; }

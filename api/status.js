@@ -6,5 +6,5 @@ const { guard, send } = require('../lib/http');
 module.exports = async function handler(req, res) {
   const body = await guard(req, res);
   if (!body) return;
-  return send(res, 200, { ok: true, ai: ai.enabled(), aiModel: ai.enabled() ? ai.MODEL : null, store: store.enabled() });
+  return send(res, 200, { ok: true, ai: ai.enabled(), aiModel: ai.enabled() ? ai.MODEL : null, store: store.enabled(), storeSetup: store.diagnosis() });
 };

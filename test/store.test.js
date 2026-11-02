@@ -64,3 +64,23 @@ test('a saved audit records its period and checkpoint', async () => {
   assert.strictEqual(body.minutes_per_enquiry, 3);
   assert.strictEqual(body.period_from, new Date(1762300800000).toISOString());
 });
+
+test('explains what is missing from the Supabase set-up', () => {
+  const save = { ...process.env };
+  delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SECRET_KEY;
+  assert.strictEqual(store.diagnosis().problem, 'missing-both');
+  process.env.SUPABASE_URL = 'https://abc.supabase.co';
+  assert.strictEqual(store.diagnosis().problem, 'missing-key');
+  process.env.SUPABASE_SECRET_KEY = 'sb_publishable_abc';
+  assert.strictEqual(store.diagnosis().problem, 'public-key');
+  assert.strictEqual(store.enabled(), false);
+  const anonJwt = `x.${Buffer.from(JSON.stringify({ role: 'anon' })).toString('base64url')}.y`.replace(/^x/, 'eyJ');
+  process.env.SUPABASE_SECRET_KEY = anonJwt;
+  assert.strictEqual(store.diagnosis().problem, 'public-key');
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_abc';
+  assert.strictEqual(store.enabled(), true);
+  delete process.env.SUPABASE_SECRET_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'sb_secret_def';
+  assert.strictEqual(store.enabled(), true);
+  Object.assign(process.env, save);
+});

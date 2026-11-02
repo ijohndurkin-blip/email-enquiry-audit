@@ -56,6 +56,7 @@
     try {
       const r = await api('/api/status', {});
       aiStatus = { ai: Boolean(r.ai), model: r.aiModel };
+      storeSetup = r.storeSetup || null;
       if (Boolean(r.store) !== remote) {
         remote = Boolean(r.store);
         try {
@@ -78,6 +79,7 @@
 
   let companies = []; // [{ id, name, goLive, settings, runs: [...] }]
   let remote = false; // true when the server stores companies in Supabase
+  let storeSetup = null; // why Supabase isn't on yet, from /api/status
   let saveChain = Promise.resolve();
   let saveTimer = null;
   const baselineCache = {}; // company id -> full baseline audit (with its enquiries)
@@ -213,12 +215,32 @@
     return bits.join(' · ');
   }
 
+  /** Explains exactly what's missing from the Supabase set-up. */
+  function supabaseHelp() {
+    const p = storeSetup && storeSetup.problem;
+    const why = {
+      'missing-both': 'The tool can\'t see either Supabase setting yet.',
+      'missing-url': '<code>SUPABASE_SECRET_KEY</code> is set, but <code>SUPABASE_URL</code> is missing.',
+      'bad-url': '<code>SUPABASE_URL</code> doesn\'t look right. It should be <code>https://jrtrsiptbfeueosfpnrw.supabase.co</code>.',
+      'missing-key': '<code>SUPABASE_URL</code> is set, but <code>SUPABASE_SECRET_KEY</code> is missing.',
+      'public-key': 'The key you added is the <b>publishable (public)</b> key. This needs a <b>secret</b> key (it starts <code>sb_secret_</code>).',
+    }[p] || 'Supabase isn\'t connected yet.';
+    return `<p><b>${why}</b></p>
+      <ol class="setup-steps">
+        <li>In Vercel, open this project → <b>Settings → Environment Variables</b>.</li>
+        <li>Add <code>SUPABASE_URL</code> = <code>https://jrtrsiptbfeueosfpnrw.supabase.co</code></li>
+        <li>Add <code>SUPABASE_SECRET_KEY</code> = a secret key from Supabase (<b>Rare2 Invoice Processor → Project Settings → API Keys → Secret keys</b>, starts <code>sb_secret_</code>).</li>
+        <li>Go to <b>Deployments</b>, open the ⋯ menu on the latest one and choose <b>Redeploy</b>. New settings only take effect after a redeploy.</li>
+        <li>Reload this page.</li>
+      </ol>`;
+  }
+
   function renderTracker() {
     const card = $('#trackerCard');
     const c = current();
     if (!c || !remote) {
       card.hidden = true;
-      if (c && !remote) { card.hidden = false; card.innerHTML = '<h2>Before-and-after checks</h2><p class="hint">To save audits and track this company over time, connect your Supabase: add <code>SUPABASE_URL</code> and <code>SUPABASE_SECRET_KEY</code> in Vercel and redeploy.</p>'; }
+      if (c && !remote) { card.hidden = false; card.innerHTML = `<h2>Before-and-after checks</h2>${supabaseHelp()}`; }
       return;
     }
     card.hidden = false;
