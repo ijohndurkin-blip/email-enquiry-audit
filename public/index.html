@@ -11,7 +11,7 @@
   <header class="top">
     <div class="wrap">
       <h1>Enquiry Audit</h1>
-      <p class="lede">Reads a business's enquiry mailboxes and shows how many enquiries came in, how quickly they were answered and how many were missed. It reads who each email is from and to, the subject and the time, never changes anything in the mailbox, and doesn't keep passwords. The only email text it reads is in website-form notifications, to find the customer's address.</p>
+      <p class="lede">Reads a business's enquiry mailboxes and shows how many enquiries came in, how quickly they were answered and how many were missed. It reads who each email is from and to, the subject and the time, never changes anything in the mailbox, and doesn't keep passwords. The only email text it reads is in website-form notifications (to find the customer's address) and, if you turn on AI sorting, the first lines of possible enquiries.</p>
     </div>
   </header>
 
@@ -33,6 +33,9 @@
         </div>
         <label class="field">Business name <small>(for the report heading)</small>
           <input name="businessName" placeholder="e.g. Darryn's Plumbing">
+        </label>
+        <label class="field">What the business does <small>(optional; helps the AI tell enquiries apart from other mail)</small>
+          <input name="about" placeholder="e.g. Plumber and heating engineer in Liverpool: boilers, bathrooms, leaks">
         </label>
         <p class="hint">Add each address enquiries arrive at. Enter the email and password, then press <b>Test connection</b>. Once it's connected, the business is saved on this browser for next time.</p>
         <div id="mailboxes"></div>
@@ -81,6 +84,11 @@
       </section>
 
       <section class="card run">
+        <div id="aiRow" class="ai-row" hidden>
+          <label class="check"><input type="checkbox" name="useAi"> <span><b>Use AI to check which emails are real enquiries</b><br>
+            <small>Sends the sender, subject and first few lines of each possible enquiry to Anthropic's Claude to sort out suppliers, personal emails and sales pitches. Nothing is stored. Costs a few pence per audit.</small></span></label>
+        </div>
+        <p id="aiOff" class="hint" hidden>AI sorting is off. To turn it on, add an <code>ANTHROPIC_API_KEY</code> environment variable in Vercel and redeploy.</p>
         <div class="actions">
           <button type="submit" class="primary" id="runBtn">Run audit</button>
           <label class="button secondary">Open a saved audit<input type="file" id="openFile" accept=".json,application/json" hidden></label>

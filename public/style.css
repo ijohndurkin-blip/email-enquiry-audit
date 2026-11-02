@@ -90,10 +90,10 @@ button, .button { font: inherit; border-radius: 8px; padding: 10px 16px; cursor:
 .headline { font-size: 17px; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 .grid2 .card { margin-bottom: 16px; }
-.bars { display: flex; gap: 6px; height: 150px; align-items: flex-end; padding-bottom: 20px; }
+.bars { display: flex; gap: 6px; height: 166px; align-items: flex-end; padding: 16px 0 20px; }
 .bar { flex: 1; height: 100%; position: relative; display: flex; align-items: flex-end; }
 .fill { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 1px; }
-.bar .n { position: absolute; left: 0; right: 0; text-align: center; top: -2px; font-size: 11px; color: var(--muted); }
+.bar .n { position: absolute; left: 0; right: 0; text-align: center; bottom: calc(var(--h, 0%) + 2px); font-size: 11px; color: var(--muted); }
 .bar .l { position: absolute; left: 0; right: 0; bottom: -20px; text-align: center; font-size: 11px; color: var(--muted); }
 .bars.compact .l { font-size: 10px; }
 .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
@@ -156,3 +156,14 @@ button.small, .button.small { padding: 7px 12px; font-size: 14px; }
 @media (max-width: 600px) {
   .conn-info { margin-left: 0; }
 }
+
+/* AI sorting and never-count */
+.ai-row { margin-bottom: 12px; }
+.ai-row .check { align-items: flex-start; margin-right: 0; }
+.ai-row input { margin-top: 4px; }
+.ai-status { background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.actions-cell { white-space: nowrap; text-align: right; }
+.link.small { font-size: 13px; margin: 0; padding: 0; }
+.never-menu { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 13px; white-space: normal; }
+.never-menu .secondary { max-width: 220px; overflow-wrap: anywhere; text-align: left; }
+code { font-size: 0.92em; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }

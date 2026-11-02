@@ -15,7 +15,9 @@ It works with any email host that supports IMAP: cPanel and most UK hosting, GoD
 ## What it does and doesn't touch
 
 - **Read-only.** Mailboxes are opened in read-only mode (IMAP `EXAMINE`), so nothing is marked as read, moved or deleted.
-- **Headers only, except form emails.** It reads sender, recipient, subject, date and the reply-chain headers. Attachments are never downloaded. The one exception: a website-form email with no reply-to address has its first 60 KB read, only to find the customer's email address in the text.
+- **Headers only, with two exceptions.** It reads sender, recipient, subject, date and the reply-chain headers, and never downloads attachments. The exceptions:
+  - A website-form email with no reply-to address has its first 60 KB read, only to find the customer's email address.
+  - With AI sorting turned on, the first lines of each possible enquiry are read and sent to the AI (see below).
 - **No database.** Results stay in your browser until you download them. Passwords are never logged or sent back.
 - **Saved connections are encrypted.** When a mailbox connects, the server sends back an encrypted token, and your browser keeps that instead of the password. The token can only be opened by this deployment's server, using a key made from `AUDIT_ACCESS_KEY`. If you change the access key, saved connections stop working and each mailbox needs connecting again. Saved audit files never contain tokens or passwords.
 - **Locked with an access key.** Without `AUDIT_ACCESS_KEY` set, the API refuses every request, so nobody else can use your deployment to try passwords against mail servers.
@@ -26,7 +28,7 @@ It works with any email host that supports IMAP: cPanel and most UK hosting, GoD
 2. Under **Settings → Environment Variables**, add `AUDIT_ACCESS_KEY` with a long random value, such as the output of `openssl rand -hex 24`.
 3. Deploy, open the site and enter the access key at the top of the page. The page remembers it in that browser.
 
-`AUDIT_ACCESS_KEY` is the only variable needed. You can optionally add `AUDIT_ENCRYPTION_KEY` to encrypt saved connections with a separate key, so changing the access key doesn't sign you out of saved mailboxes.
+`AUDIT_ACCESS_KEY` is the only variable needed. To turn on AI sorting (below), also add `ANTHROPIC_API_KEY` with a key from [console.anthropic.com](https://console.anthropic.com/settings/keys). The AI uses Claude Opus 5.5 by default; set `AUDIT_AI_MODEL` to use a different model. You can optionally add `AUDIT_ENCRYPTION_KEY` to encrypt saved connections with a separate key, so changing the access key doesn't sign you out of saved mailboxes.
 
 The audit function is allowed to run for up to 60 seconds (`vercel.json`). Two mailboxes covering 30–60 days usually take 10–30 seconds.
 
@@ -44,6 +46,18 @@ The audit function is allowed to run for up to 60 seconds (`vercel.json`). Two m
 5. **Keep it.** Use **Save audit file** to keep a copy you can reopen later (passwords are never saved), **Download spreadsheet** for a CSV, or **Print / PDF** for the case study.
 
 Save the "before" audit file straight away. If the business later deletes or archives old emails, re-running the before period won't give the same numbers.
+
+## Telling real enquiries from other mail
+
+Automated mail (newsletters, notifications, receipts, no-reply senders, account emails) is filtered by rules. Emails from real people about something else, such as suppliers, the accountant or friends, look like enquiries to the rules. Three tools deal with them:
+
+1. **Untick it** on the Counted tab. Your ticks and unticks always win over the rules and the AI.
+2. **Never count…** on any row. Choose the exact address, or everyone at that company's domain (not offered for Gmail, Hotmail and similar). The sender is added to the business's "Never count mail from" list, saved with the business and applied to every future audit. "Count again" undoes it.
+3. **AI sorting (optional).** Tick *Use AI to check which emails are real enquiries* before running. Each email the rules counted is sorted by Claude into one of: new enquiry, about a job already booked, supplier or trade, personal, sales pitch, automated, spam or other. Anything that isn't a new enquiry moves to Not counted with the AI's reason, so you can tick it back.
+   - **What's sent:** the sender's name and address, the subject, whether the business replied, and the first ~800 characters of the customer's latest message, with quoted history removed. Emails the rules already filtered out are never read or sent. Nothing is stored by this tool. Anthropic's commercial terms cover how API data is handled; by default it isn't used to train models.
+   - **What it costs:** a few pence per audit. It runs in batches of 15 at low effort.
+   - **Better results:** fill in *What the business does* (e.g. "Plumber in Liverpool: boilers, bathrooms, leaks").
+   - If the AI declines a batch, Anthropic's server-side fallback re-runs it on another model. If the AI fails, the rule-based results stay and you can press **Check with AI** to try again.
 
 ## When a mailbox won't connect
 
@@ -101,6 +115,8 @@ AUDIT_ACCESS_KEY=test npm run dev      # http://localhost:3000
 |---|---|
 | `api/connect.js` | Vercel function: tests a mailbox and returns an encrypted saved-connection token |
 | `api/audit.js` | Vercel function: checks the access key, reads the mailboxes, builds the enquiries |
+| `api/status.js` / `api/classify.js` | Reports whether AI sorting is on / sorts a batch of up to 20 emails with Claude |
+| `lib/ai.js` | The AI prompt, categories and JSON-schema structured output |
 | `lib/secret.js` | Encrypts and decrypts saved connections (AES-256-GCM) |
 | `public/mailboxes.js` | Mailbox cards: test connection, saved connections, Sent folder choice |
 | `lib/discover.js` | Finds IMAP settings from an email address (ported from the enquiry app); certificate-name retry, STARTTLS on port 143, lockout-safe sign-in |

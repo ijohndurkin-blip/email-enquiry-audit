@@ -12,6 +12,12 @@
   let audit = null; // { result }
   let tab = 'counted';
   let profileId = null; // the saved business currently open
+  let aiStatus = { ai: false, model: null }; // what the server has switched on
+  let aiMessage = ''; // progress or errors from AI sorting, shown above the results
+  let aiBusy = false;
+  let neverOpen = null; // the enquiry whose "never count" choices are showing
+  const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|aol|icloud|me|mac|btinternet|sky|virginmedia|talktalk|proton|protonmail|gmx|mail)\./;
+  const NEVER = 'On your "never count" list';
 
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -42,6 +48,18 @@
     if (res.status === 401 || res.status === 500) { form.accessKey.focus(); throw new Error(data.error); }
     if (!res.ok && !('ok' in data)) throw Object.assign(new Error(data.error || `Error ${res.status}`), { data });
     return data;
+  }
+
+  /** Ask the server which optional features are on (AI sorting). */
+  async function checkStatus() {
+    if (!form.accessKey.value.trim()) return;
+    try {
+      const r = await api('/api/status', {});
+      aiStatus = { ai: Boolean(r.ai), model: r.aiModel };
+    } catch { aiStatus = { ai: false, model: null }; }
+    $('#aiRow').hidden = !aiStatus.ai;
+    $('#aiOff').hidden = aiStatus.ai;
+    if (audit) render();
   }
 
   // --- Saved businesses -------------------------------------------------------------
@@ -105,7 +123,7 @@
     $('#workDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="check day"><input type="checkbox" value="${d}"${d >= 1 && d <= 5 ? ' checked' : ''}> ${DAYS[d]}</label>`).join('');
     defaultDates();
     form.accessKey.value = store.get('auditAccessKey') || '';
-    form.accessKey.addEventListener('change', accessKey);
+    form.accessKey.addEventListener('change', () => { accessKey(); checkStatus(); });
 
     Mailboxes.init($('#mailboxes'), { api, onChange: saveProfile });
     $('#addMailbox').addEventListener('click', () => Mailboxes.add());
@@ -114,7 +132,7 @@
     form.compare.addEventListener('change', syncCompare);
 
     // Changing hours, minutes or periods re-works the numbers without reading the mailboxes again.
-    ['tz', 'workStart', 'workEnd', 'minsA', 'minsB', 'aFrom', 'aTo', 'bFrom', 'bTo', 'compare', 'businessName', 'otherAddresses', 'ignoreSenders'].forEach((n) => form[n].addEventListener('change', () => {
+    ['tz', 'workStart', 'workEnd', 'minsA', 'minsB', 'aFrom', 'aTo', 'bFrom', 'bTo', 'compare', 'businessName', 'otherAddresses', 'ignoreSenders', 'about', 'useAi'].forEach((n) => form[n].addEventListener('change', () => {
       if (audit) render();
       if (profileId) saveProfile();
     }));
@@ -126,6 +144,7 @@
     if (last && profiles().some((p) => p.id === last)) openProfile(last);
     else { renderProfiles(); syncCompare(); }
     if (!form.accessKey.value) form.accessKey.focus();
+    else checkStatus();
   }
 
   function syncCompare() {
@@ -186,17 +205,104 @@
         mailboxes,
         otherAddresses: form.otherAddresses.value,
         ignoreSenders: form.ignoreSenders.value,
+        withText: useAi(),
       });
-      audit = { result: data };
+      audit = { result: data, withText: useAi() };
       tab = 'counted';
+      aiMessage = '';
       setStatus('');
       render();
       resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (audit.withText) aiSort();
     } catch (err) {
       setStatus(`<strong>${esc(err.message)}</strong>${mailboxErrors(err.data && err.data.mailboxes)}`, 'error');
     } finally {
       btn.disabled = false;
     }
+  }
+
+  const useAi = () => aiStatus.ai && form.useAi.checked;
+
+  // --- AI sorting -------------------------------------------------------------------
+
+  /** Enquiries the rules counted that the AI hasn't checked yet (your own ticks are never overridden). */
+  const aiCandidates = () => (audit ? audit.result.enquiries.filter((e) => e.include && e.manual == null && !e.ai) : []);
+
+  async function aiSort() {
+    if (aiBusy || !audit) return;
+    const todo = aiCandidates();
+    if (!todo.length) { aiMessage = 'AI check: nothing left to check.'; render(); return; }
+    aiBusy = true;
+    const business = { name: form.businessName.value.trim(), about: form.about.value.trim() };
+    const BATCH = 15;
+    let done = 0;
+    let moved = 0;
+    try {
+      for (let i = 0; i < todo.length; i += BATCH) {
+        aiMessage = `<span class="spinner"></span> AI is checking the emails: ${done} of ${todo.length} done…`;
+        render();
+        const batch = todo.slice(i, i + BATCH);
+        const r = await api('/api/classify', {
+          business,
+          items: batch.map((e) => ({
+            id: e.id, fromName: e.customerName, fromEmail: e.customerEmail, subject: e.subject,
+            viaForm: e.viaForm, replied: Boolean(e.firstReplyAt), snippet: e.snippet || '',
+          })),
+        });
+        for (const v of r.results || []) {
+          const e = audit.result.enquiries.find((x) => x.id === v.id);
+          if (!e || e.manual != null) continue;
+          e.ai = { category: v.category, label: v.label, reason: v.reason, enquiry: v.enquiry };
+          if (!v.enquiry) {
+            e.include = false;
+            e.reason = `AI: ${v.label}. ${v.reason}`;
+            moved += 1;
+          }
+        }
+        done += batch.length;
+      }
+      aiMessage = `AI checked ${done} email${done === 1 ? '' : 's'} and moved ${moved} to Not counted. Check the Not counted tab and tick any it got wrong.`;
+    } catch (err) {
+      aiMessage = `<span class="bad">${esc(err.message)}</span> The ${done} checked so far are kept; press "Check with AI" to try the rest.`;
+    } finally {
+      aiBusy = false;
+      render();
+    }
+  }
+
+  // --- Never count -------------------------------------------------------------------
+
+  const ignoreList = () => form.ignoreSenders.value.split(/[\n,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const onList = (email, list = ignoreList()) => Boolean(email) && list.some((x) => email.toLowerCase().includes(x));
+
+  function neverCount(entry) {
+    const list = ignoreList();
+    if (!list.includes(entry)) form.ignoreSenders.value = [...list, entry].join('\n');
+    let n = 0;
+    for (const e of audit.result.enquiries) {
+      if (!onList(e.customerEmail, [entry]) || e.manual === true || e.reason === NEVER) continue;
+      e.before = { include: e.include, reason: e.reason || null };
+      e.include = false;
+      e.reason = NEVER;
+      n += 1;
+    }
+    neverOpen = null;
+    if (profileId || Mailboxes.connectedCount()) saveProfile();
+    aiMessage = `Mail from <b>${esc(entry)}</b> won't be counted for this business from now on${n ? ` (${n} in this audit)` : ''}. Undo it with "Count again", or under More options.`;
+    render();
+  }
+
+  function removeNever(email) {
+    const keep = ignoreList().filter((x) => !email.toLowerCase().includes(x));
+    form.ignoreSenders.value = keep.join('\n');
+    for (const e of audit.result.enquiries) {
+      if (e.reason !== NEVER || onList(e.customerEmail, keep)) continue;
+      e.include = e.before ? e.before.include : true;
+      e.reason = e.before ? e.before.reason : null;
+      delete e.before;
+    }
+    if (profileId) saveProfile();
+    render();
   }
 
   function mailboxErrors(list) {
@@ -209,7 +315,7 @@
   function settingsSnapshot({ tokens = false } = {}) {
     const w = work();
     return {
-      businessName: form.businessName.value, ...w,
+      businessName: form.businessName.value, about: form.about.value, useAi: form.useAi.checked, ...w,
       aFrom: form.aFrom.value, aTo: form.aTo.value, compare: form.compare.checked, bFrom: form.bFrom.value, bTo: form.bTo.value,
       minsA: form.minsA.value, minsB: form.minsB.value,
       mailboxes: Mailboxes.snapshot({ tokens }), // passwords are never saved
@@ -219,15 +325,17 @@
 
   function applySettings(s) {
     if (!s) {
-      ['businessName', 'minsA', 'minsB', 'bFrom', 'bTo', 'otherAddresses', 'ignoreSenders'].forEach((k) => { form[k].value = ''; });
+      ['businessName', 'about', 'minsA', 'minsB', 'bFrom', 'bTo', 'otherAddresses', 'ignoreSenders'].forEach((k) => { form[k].value = ''; });
       form.compare.checked = false;
+      form.useAi.checked = false;
       defaultDates();
       Mailboxes.load([]);
       syncCompare();
       return;
     }
-    ['businessName', 'aFrom', 'aTo', 'bFrom', 'bTo', 'minsA', 'minsB', 'workStart', 'workEnd', 'otherAddresses', 'ignoreSenders'].forEach((k) => { if (s[k] != null) form[k].value = s[k]; });
+    ['businessName', 'about', 'aFrom', 'aTo', 'bFrom', 'bTo', 'minsA', 'minsB', 'workStart', 'workEnd', 'otherAddresses', 'ignoreSenders'].forEach((k) => { if (s[k] != null) form[k].value = s[k]; });
     if (s.tz) form.tz.value = s.tz;
+    form.useAi.checked = Boolean(s.useAi);
     form.compare.checked = Boolean(s.compare);
     if (Array.isArray(s.workDays)) $('#workDays').querySelectorAll('input').forEach((i) => { i.checked = s.workDays.includes(Number(i.value)); });
     if (Array.isArray(s.mailboxes)) Mailboxes.load(s.mailboxes);
@@ -247,7 +355,9 @@
 
   function saveAudit() {
     // The audit file carries no passwords or connection tokens.
-    download(`${fileBase()}.json`, 'application/json', JSON.stringify({ type: 'enquiry-audit', version: 1, settings: settingsSnapshot(), result: audit.result }, null, 2));
+    // Email text read for the AI check isn't kept in the file either.
+    const result = { ...audit.result, enquiries: audit.result.enquiries.map(({ snippet, ...e }) => e) };
+    download(`${fileBase()}.json`, 'application/json', JSON.stringify({ type: 'enquiry-audit', version: 1, settings: settingsSnapshot(), result }, null, 2));
   }
 
   async function openSaved(ev) {
@@ -262,6 +372,7 @@
       if (Mailboxes.connectedCount()) delete s.mailboxes;
       applySettings(s);
       audit = { result: data.result };
+      aiMessage = '';
       setStatus(`Opened the audit saved on ${new Date(data.result.generatedAt).toLocaleString('en-GB')}.`, 'ok');
       render();
     } catch (err) {
@@ -273,7 +384,7 @@
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
-    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Reason not counted / note']];
+    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'AI check', 'Reason not counted / note']];
     for (const e of audit.result.enquiries) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
       const w = work();
@@ -282,7 +393,7 @@
         e.viaForm ? 'yes' : '', fmt(e.firstReplyAt),
         e.firstReplyAt ? ((e.firstReplyAt - e.receivedAt) / 3600000).toFixed(2) : '',
         e.firstReplyAt ? (M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000).toFixed(2) : '',
-        e.inboundCount, e.outboundCount, e.reason || e.note || '',
+        e.inboundCount, e.outboundCount, e.ai ? `${e.ai.label}: ${e.ai.reason}` : '', e.reason || e.note || '',
       ]);
     }
     const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -314,8 +425,10 @@
           <button type="button" class="secondary" data-act="csv">Download spreadsheet (CSV)</button>
           <button type="button" class="secondary" data-act="save">Save audit file</button>
           <button type="button" class="secondary" data-act="print">Print / PDF</button>
+          ${audit.withText && aiStatus.ai && !aiBusy && aiCandidates().length ? `<button type="button" class="primary" data-act="ai">Check ${aiCandidates().length} with AI</button>` : ''}
         </div>
       </div>
+      ${aiMessage ? `<p class="ai-status no-print">${aiMessage}</p>` : ''}
       ${mailboxNotes(r)}
       ${stats.length === 1 ? tiles(stats[0].m) : compareTable(stats)}
       <div class="card story"><h3>For the case study</h3>${stats.map((s) => `<p>${story(s, name, range)}</p>`).join('')}${savingLine(stats)}</div>
@@ -330,11 +443,19 @@
       if (b.dataset.act === 'csv') csv();
       if (b.dataset.act === 'save') saveAudit();
       if (b.dataset.act === 'print') window.print();
+      if (b.dataset.act === 'ai') aiSort();
+    }));
+    resultsEl.querySelectorAll('[data-never]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.never === 'open') { neverOpen = Number(b.dataset.id); render(); return; }
+      if (b.dataset.never === 'cancel') { neverOpen = null; render(); return; }
+      if (b.dataset.never === 'remove') { removeNever(b.dataset.email); return; }
+      neverCount(b.dataset.never);
     }));
     resultsEl.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
     resultsEl.querySelectorAll('input[data-id]').forEach((cb) => cb.addEventListener('change', () => {
       const e = r.enquiries.find((x) => x.id === Number(cb.dataset.id));
       e.include = cb.checked;
+      e.manual = cb.checked; // your choice always wins over the rules and the AI
       render();
     }));
   }
@@ -420,7 +541,7 @@
 
   function bars(title, data, compact) {
     const max = Math.max(1, ...data.map((d) => d[1]));
-    return `<div class="card"><h3>${title}</h3><div class="bars${compact ? ' compact' : ''}">${data.map(([label, n, full]) => `<div class="bar" title="${esc(full || label)}: ${n}"><div class="fill" style="height:${(n / max) * 100}%"></div><span class="n">${n || ''}</span><span class="l">${esc(label)}</span></div>`).join('')}</div></div>`;
+    return `<div class="card"><h3>${title}</h3><div class="bars${compact ? ' compact' : ''}">${data.map(([label, n, full]) => `<div class="bar" style="--h:${(n / max) * 100}%" title="${esc(full || label)}: ${n}"><div class="fill" style="height:${(n / max) * 100}%"></div><span class="n">${n || ''}</span><span class="l">${esc(label)}</span></div>`).join('')}</div></div>`;
   }
 
   function table(r, ps, w) {
@@ -431,7 +552,10 @@
     const rows = tab === 'counted' ? counted : notCounted;
     const fmt = (t) => new Date(t).toLocaleString('en-GB', { timeZone: w.tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     const reasons = {};
-    notCounted.forEach((e) => { reasons[e.reason || 'Unticked by you'] = (reasons[e.reason || 'Unticked by you'] || 0) + 1; });
+    notCounted.forEach((e) => {
+      const key = e.ai && !e.ai.enquiry && /^AI:/.test(e.reason || '') ? `AI: ${e.ai.label}` : (e.reason || 'Unticked by you');
+      reasons[key] = (reasons[key] || 0) + 1;
+    });
     return `<div class="card tablecard">
       <div class="tabs no-print">
         <button type="button" data-tab="counted" class="${tab === 'counted' ? 'on' : ''}">Counted (${counted.length})</button>
@@ -439,7 +563,7 @@
       </div>
       <p class="hint no-print">${tab === 'counted' ? 'Untick anything that isn\'t a real enquiry; the numbers update straight away.' : `Tick anything that is a real enquiry. ${Object.entries(reasons).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ')}`}</p>
       <div class="scroll"><table class="list">
-        <thead><tr><th class="no-print">Count</th><th>Received</th><th>From</th><th>Subject</th><th>First reply</th><th>Emails</th><th>${tab === 'counted' ? 'Note' : 'Why not counted'}</th></tr></thead>
+        <thead><tr><th class="no-print">Count</th><th>Received</th><th>From</th><th>Subject</th><th>First reply</th><th>Emails</th><th>${tab === 'counted' ? 'Note' : 'Why not counted'}</th><th class="no-print"></th></tr></thead>
         <tbody>${rows.map((e) => {
           const h = e.firstReplyAt ? (e.firstReplyAt - e.receivedAt) / 3600000 : null;
           const reply = !e.replyMatchable ? '<span class="muted">can\'t tell</span>' : (h == null ? '<span class="bad">none found</span>' : `${M.duration(h)}<small>${M.duration(M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000)} working</small>`);
@@ -451,11 +575,25 @@
             <td class="subject">${esc(e.subject)}</td>
             <td>${reply}</td>
             <td>${e.inboundCount + e.outboundCount}</td>
-            <td class="muted">${esc(tab === 'counted' ? e.note : (e.reason || 'Unticked by you'))}</td>
+            <td class="muted">${esc(tab === 'counted' ? (e.ai ? `AI: ${e.ai.reason}` : e.note) : (e.reason || 'Unticked by you'))}</td>
+            <td class="no-print actions-cell">${neverButtons(e)}</td>
           </tr>`;
-        }).join('') || '<tr><td colspan="7" class="muted">Nothing here.</td></tr>'}</tbody>
+        }).join('') || '<tr><td colspan="8" class="muted">Nothing here.</td></tr>'}</tbody>
       </table></div>
     </div>`;
+  }
+
+  /** "Never count" choices for one row: the address, or the whole domain for business senders. */
+  function neverButtons(e) {
+    const email = (e.customerEmail || '').toLowerCase();
+    if (!email) return '';
+    if (e.reason === NEVER) return `<button type="button" class="link small" data-never="remove" data-email="${esc(email)}">Count again</button>`;
+    if (neverOpen !== e.id) return `<button type="button" class="link small" data-never="open" data-id="${e.id}" title="Skip this sender in future audits">Never count…</button>`;
+    const domain = email.split('@')[1] || '';
+    return `<div class="never-menu"><span>Never count:</span>
+      <button type="button" class="secondary small" data-never="${esc(email)}">${esc(email)}</button>
+      ${domain && !FREE_MAIL.test(domain) ? `<button type="button" class="secondary small" data-never="@${esc(domain)}">anyone @${esc(domain)}</button>` : ''}
+      <button type="button" class="link small" data-never="cancel">Cancel</button></div>`;
   }
 
   initForm();

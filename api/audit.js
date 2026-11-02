@@ -35,7 +35,11 @@ module.exports = async function handler(req, res) {
   const results = await Promise.allSettled(accounts.map((a) => readMailbox({
     email: a.email, password: a.password, host: a.host || undefined, port: a.port || undefined,
     secure: a.secure !== false, user: a.user || undefined, allowBadCert: Boolean(a.allowBadCert), sentFolder: a.sentFolder || undefined,
-  }, since)));
+  }, since, {
+    // With AI sorting on, also read the first lines of each possible enquiry.
+    withText: Boolean(body.withText),
+    otherAddresses: String(body.otherAddresses || '').split(/[\s,;]+/).filter(Boolean),
+  })));
 
   const mailboxes = results.map((r, i) => {
     const email = String(accounts[i].email).trim().toLowerCase();

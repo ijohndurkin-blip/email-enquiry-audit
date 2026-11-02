@@ -147,3 +147,11 @@ test('form emails without Reply-To use the customer address found in the text', 
   assert.strictEqual(enquiries[0].viaForm, true);
   assert.strictEqual(enquiries[0].firstReplyAt - enquiries[0].receivedAt, 2 * H);
 });
+
+test('only possible enquiries are picked for the AI to read', () => {
+  const { isCandidate, stripQuoted } = require('../lib/build');
+  assert.strictEqual(isCandidate(inMsg(T0, 'jo@gmail.com', 'Quote'), 'enquiries@darryn.co.uk'), true);
+  assert.strictEqual(isCandidate(inMsg(T0, 'news@shop.com', 'Deals', { headers: { listUnsubscribe: true } }), 'enquiries@darryn.co.uk'), false);
+  assert.strictEqual(isCandidate(inMsg(T0, 'darryn@darryn.co.uk', 'note'), 'enquiries@darryn.co.uk'), false);
+  assert.strictEqual(stripQuoted('Yes Tuesday is fine\n\nOn Mon, 5 Oct 2026, Darryn wrote:\n> old text'), 'Yes Tuesday is fine');
+});
