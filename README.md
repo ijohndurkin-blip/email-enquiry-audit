@@ -130,7 +130,15 @@ How the verdict works:
 
 **What's sent:** the customer's first email and the business's first reply, read live from the mailbox, with quoted history trimmed and up to about 2,000 characters each. Only the scores and tips are kept.
 
-## Estimating "minutes per enquiry before the app"
+## Time spent: minutes per reply
+
+Time is measured **per reply**: one email written, from opening the customer's email to pressing send. That's what a stopwatch measures. The audit counts every reply the business wrote in the period, so:
+
+> hours = replies written × minutes per reply, scaled to a week, a month and a year.
+
+"Minutes per reply with the app" is the average across all replies, with automatic ones counting as 0. **Hours saved** takes the after period's enquiries handled the old way (the "before" replies per enquiry × the "before" minutes per reply) and subtracts the time actually spent with the app, so the app's extra automatic follow-ups don't count as saved work.
+
+## Estimating "minutes per reply before the app"
 
 After running the **Before the app** audit, press **Work out "before" from the emails** in section 3. It reads the business's real replies (up to 40 enquiries spread across the period) and estimates the time each took by hand:
 
@@ -143,7 +151,7 @@ After running the **Before the app** audit, press **Work out "before" from the e
 | Attachments (from the email itself) | +3 min |
 | Mostly a standard / copy-paste reply (AI) | writing counts 30% |
 
-It fills in the box with the average and shows the breakdown, how often each kind of work came up, and the rates used. Each enquiry's estimate is in the summary CSVs. Without AI it uses word counts only. Only the minutes and short notes come back from the server; no email text is kept.
+It fills in the box with the average **minutes per reply** and shows per enquiry, replies per enquiry, this audit's total, and hours a week, month and year, plus the breakdown, how often each kind of work came up, and the rates used. Each enquiry's estimate is in the summary CSVs. Without AI it uses word counts only. Only the minutes and short notes come back from the server; no email text is kept.
 
 It's an estimate: emails can't show phone calls or time spent thinking before writing. To make the figure solid for a case study, time 3–5 replies with a stopwatch and adjust it if needed. It's meant for replies written **by hand**, so run it on the Before audit; for the "with the app" figure, see the README's suggestion to log handling time in the enquiry app.
 

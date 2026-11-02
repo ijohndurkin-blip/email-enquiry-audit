@@ -69,7 +69,8 @@
 
   /**
    * @param {object[]} enquiries  (already filtered to the period and to include === true)
-   * @param {{from:number, to:number, tz, workStart, workEnd, workDays, minutesPerEnquiry?:number}} o
+   * @param {{from:number, to:number, tz, workStart, workEnd, workDays, minutesPerReply?:number}} o
+   *   minutesPerReply: time to deal with one email (open the customer's email, write, send).
    */
   function compute(enquiries, o) {
     const days = Math.max(1, (o.to - o.from) / DAY);
@@ -108,7 +109,11 @@
     const qualityShare = {};
     for (const k of QUALITY_KEYS) qualityShare[k] = scored.length ? scored.filter((e) => e.quality.checks && e.quality.checks[k]).length / scored.length : null;
     const lost = enquiries.filter((e) => e.outcome === 'lost').length;
-    const mins = Number(o.minutesPerEnquiry);
+    const mins = Number(o.minutesPerReply != null ? o.minutesPerReply : o.minutesPerEnquiry);
+    const has = Number.isFinite(mins) && mins > 0;
+    // Time spent = replies the business actually wrote x minutes per reply.
+    const repliesSent = enquiries.reduce((a, e) => a + (e.outboundCount || 0), 0);
+    const hoursIn = (periodDays) => (has ? ((repliesSent * periodDays) / days * mins) / 60 : null);
     return {
       days,
       count: enquiries.length,
@@ -142,10 +147,14 @@
       qualityScored: scored.length,
       avgQuality: scored.length ? scored.reduce((a, e) => a + e.quality.score, 0) / scored.length : null,
       qualityShare,
-      minutesPerEnquiry: Number.isFinite(mins) && mins > 0 ? mins : null,
-      hoursPerMonth: Number.isFinite(mins) && mins > 0 ? (perMonth(enquiries.length) * mins) / 60 : null,
-      hoursPerWeek: Number.isFinite(mins) && mins > 0 ? ((enquiries.length * 7) / days * mins) / 60 : null,
-      hoursPerYear: Number.isFinite(mins) && mins > 0 ? ((enquiries.length * 365) / days * mins) / 60 : null,
+      repliesSent,
+      repliesPerEnquiry: enquiries.length ? repliesSent / enquiries.length : null,
+      repliesPerMonth: perMonth(repliesSent),
+      minutesPerReply: has ? mins : null,
+      minutesPerEnquiry: has && enquiries.length ? (mins * repliesSent) / enquiries.length : null,
+      hoursPerMonth: hoursIn(30),
+      hoursPerWeek: hoursIn(7),
+      hoursPerYear: hoursIn(365),
     };
   }
 

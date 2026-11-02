@@ -402,4 +402,4 @@ select.outcome { width: auto; margin: 0; padding: 4px 6px; font-size: 13px; }
 .est-totals span { display: block; font-size: 12px; color: var(--muted); }
 .est-totals b { display: block; font-size: 18px; color: var(--heading); font-family: Montserrat, system-ui, sans-serif; }
 .est-totals small { display: block; font-size: 11.5px; }
-.est-totals .year { border-color: var(--cyan); border-width: 2px; }
+.est-totals .year, .est-totals .main { border-color: var(--cyan); border-width: 2px; }

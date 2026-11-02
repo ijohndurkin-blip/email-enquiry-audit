@@ -95,19 +95,19 @@
         </div>
         <div class="days" id="workDays"></div>
         <div class="row">
-          <label class="field">Minutes per enquiry before the app <small>(timed or estimated)</small>
+          <label class="field">Minutes per reply before the app <small>(each email written: open, write, send)</small>
             <input type="number" name="minsA" min="0" step="0.5" placeholder="e.g. 12">
           </label>
-          <label class="field">Minutes per enquiry with the app
+          <label class="field">Minutes per reply with the app <small>(automatic replies count as 0)</small>
             <input type="number" name="minsB" min="0" step="0.5" placeholder="e.g. 3">
           </label>
         </div>
         <div class="estimate">
-          <button type="button" class="secondary small" id="estimateMins" disabled>Work out "before" from the emails</button>
+          <button type="button" class="secondary small" id="estimateMins" disabled>Work out minutes per reply from the emails</button>
           <span class="hint" id="estimateHint">Run an audit first. This estimates the minutes from the real replies: their length, and what work they needed (prices, quotes, dates, attachments).</span>
         </div>
         <div id="estimateBox"></div>
-        <p class="hint">Email can't show exactly how long someone spends on each enquiry, so this is an estimate. To make it solid, time 3–5 replies with a stopwatch and adjust the figure if needed.</p>
+        <p class="hint">Time is counted per reply because that's what a stopwatch measures: from opening the customer's email to pressing send. The audit counts how many replies the business wrote, so the hours a week, month and year come from real numbers. Email can't show the exact minutes, so time 3–5 replies with a stopwatch and adjust the figure if needed.</p>
       </section>
 
       <section class="card run">

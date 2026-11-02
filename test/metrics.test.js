@@ -39,7 +39,9 @@ test('compute works out medians, rates and time spent', () => {
   assert.strictEqual(m.within24h, 0.75);
   assert.strictEqual(m.outOfHours, 2); // Wed 20:00 and Saturday
   assert.strictEqual(m.viaForm, 1);
-  assert.strictEqual(m.hoursPerMonth, 0.8); // 4 enquiries × 12 min
+  assert.strictEqual(m.repliesSent, 3); // the unanswered one has no reply
+  assert.strictEqual(m.hoursPerMonth, 0.6); // 3 replies x 12 min a reply
+  assert.strictEqual(m.minutesPerEnquiry, 9); // 36 min over 4 enquiries
   assert.strictEqual(M.duration(0.5), '30 min');
   assert.strictEqual(M.duration(3), '3 hrs');
 });
@@ -86,9 +88,9 @@ test('reply quality averages and the most-missed check', () => {
 
 test('time spent per week, month and year', () => {
   const from = london(2026, 10, 1, 0);
-  const list = Array.from({ length: 30 }, (_, i) => ({ receivedAt: from + i * 24 * H + H, inboundCount: 1, outboundCount: 0, mailboxes: [] }));
-  const m = M.compute(list, { ...w, from, to: from + 30 * 24 * H, minutesPerEnquiry: 12 });
-  // 30 enquiries in 30 days at 12 min: 6 hrs/month, 1.4 hrs/week, 73 hrs/year
+  const list = Array.from({ length: 30 }, (_, i) => ({ receivedAt: from + i * 24 * H + H, inboundCount: 1, outboundCount: 1, mailboxes: [] }));
+  const m = M.compute(list, { ...w, from, to: from + 30 * 24 * H, minutesPerReply: 12 });
+  // 30 replies in 30 days at 12 min each: 6 hrs/month, 1.4 hrs/week, 73 hrs/year
   assert.strictEqual(Math.round(m.hoursPerMonth * 10) / 10, 6);
   assert.strictEqual(Math.round(m.hoursPerWeek * 10) / 10, 1.4);
   assert.strictEqual(Math.round(m.hoursPerYear), 73);

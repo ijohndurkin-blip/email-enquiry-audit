@@ -408,7 +408,7 @@
     (b.result.enquiries || []).forEach((e) => { e.existing = Boolean(e.customerEmail) && known.has(e.customerEmail.toLowerCase()); });
     const p = { label: 'Before', from: Date.parse(b.period_from), to: Date.parse(b.period_to), mins: b.minutes_per_enquiry };
     const list = (b.result.enquiries || []).filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
-    return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }), saved: true };
+    return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerReply: p.mins }), saved: true };
   }
 
   /** Saved audits for the open company, in date order, for the progress charts. */
@@ -473,7 +473,7 @@
     });
     $('#threadClose').addEventListener('click', () => $('#threadDialog').close());
     $('#estimateMins').addEventListener('click', estimateMinutes);
-    form.minsA.addEventListener('input', () => { if (estimate && Number(form.minsA.value) !== Math.round(estimate.minutes * 2) / 2) estimate.edited = true; });
+    form.minsA.addEventListener('input', () => { if (estimate && Number(form.minsA.value) !== Math.round((estimate.perReply || estimate.minutes) * 2) / 2) estimate.edited = true; });
     renderCustomers();
     $('#openFile').addEventListener('change', openSaved);
 
@@ -687,7 +687,7 @@
     const hint = $('#estimateHint');
     const n = estimateCandidates().length;
     btn.disabled = estimateBusy || !n || !Mailboxes.connectedCount();
-    btn.innerHTML = estimateBusy ? '<span class="spinner"></span>Working it out…' : 'Work out "before" from the emails';
+    btn.innerHTML = estimateBusy ? '<span class="spinner"></span>Working it out…' : 'Work out minutes per reply from the emails';
     hint.textContent = !audit ? 'Run an audit first. This estimates the minutes from the real replies: their length, and what work they needed (prices, quotes, dates, attachments).'
       : !n ? 'No replied enquiries in this audit to measure.'
         : !Mailboxes.connectedCount() ? 'Connect the mailbox to read the replies.'
@@ -695,25 +695,29 @@
     const box = $('#estimateBox');
     if (!estimate) { box.innerHTML = ''; return; }
     const p = estimate.parts;
+    // Estimates saved before "per reply" existed: 1 admin minute per reply gives the reply count.
+    if (estimate.repliesPerEnquiry == null && p.admin) { estimate.repliesPerEnquiry = p.admin; estimate.perReply = estimate.minutes / p.admin; }
     const share = (k) => Math.round((estimate.notes[k] || 0) / estimate.n * 100);
     const notes = ['looked up prices', 'worked out a quote', 'checked dates', 'technical answer', 'attached a document', 'mostly a standard reply'].filter((k) => estimate.notes[k]).map((k) => `${k} in ${share(k)}%`);
     const fromApp = audit && audit.meta && audit.meta.kind === 'checkpoint';
     // Totals use this audit's enquiry count over its period, at the estimated minutes.
     const stat = audit ? periodStats().slice(-1)[0] : null;
     const m = stat ? stat.m : null;
-    const min = estimate.minutes;
+    const per = estimate.perReply;
+    // Totals: the replies the business actually wrote in this audit x minutes per reply.
+    const hrs = (periodDays) => (m.repliesSent * periodDays / m.days * per) / 60;
     const totals = m && m.count ? `<div class="est-totals">
-        <div><span>Per enquiry</span><b>${num(min, 1)} min</b><small>the whole conversation</small></div>
-        <div><span>Per reply</span><b>${num(estimate.perReply, 1)} min</b><small>${num(estimate.repliesPerEnquiry, 1)} replies per enquiry</small></div>
-        <div><span>This audit</span><b>${M.duration(m.count * min / 60)}</b><small>${m.count} enquir${m.count === 1 ? 'y' : 'ies'} in ${Math.round(m.days)} days</small></div>
-        <div><span>A week</span><b>${num(m.count * 7 / m.days * min / 60, 1)} hrs</b></div>
-        <div><span>A month</span><b>${num(m.count * 30 / m.days * min / 60, 1)} hrs</b></div>
-        <div class="year"><span>A year</span><b>${num(m.count * 365 / m.days * min / 60, 0)} hrs</b><small>${workDays(m.count * 365 / m.days * min / 60)}</small></div>
+        <div class="main"><span>Per reply</span><b>${num(per, 1)} min</b><small>each email written</small></div>
+        <div><span>Per enquiry</span><b>${num(estimate.minutes, 1)} min</b><small>${num(estimate.repliesPerEnquiry, 1)} replies each</small></div>
+        <div><span>This audit</span><b>${M.duration(hrs(m.days))}</b><small>${m.repliesSent} replies to ${m.count} enquir${m.count === 1 ? 'y' : 'ies'} in ${Math.round(m.days)} days</small></div>
+        <div><span>A week</span><b>${num(hrs(7), 1)} hrs</b></div>
+        <div><span>A month</span><b>${num(hrs(30), 1)} hrs</b></div>
+        <div class="year"><span>A year</span><b>${num(hrs(365), 0)} hrs</b><small>${workDays(hrs(365))}</small></div>
       </div>` : '';
     box.innerHTML = `<div class="estimate-box">
-      <strong>About ${num(estimate.minutes, 1)} minutes per enquiry</strong> <small class="muted">the whole conversation, every reply and follow-up · estimated from ${estimate.n} enquir${estimate.n === 1 ? 'y' : 'ies'}${estimate.usedAi ? ', with AI reading the context' : ', word counts only'}</small>
+      <strong>About ${num(per, 1)} minutes per reply</strong> <small class="muted">each email the business writes, from opening the customer's email to pressing send · estimated from ${estimate.n} enquir${estimate.n === 1 ? 'y' : 'ies'}${estimate.usedAi ? ', with AI reading the context' : ', word counts only'}</small>
       ${totals}
-      <p class="hint" style="margin:8px 0 2px">Where the time per enquiry goes:</p>
+      <p class="hint" style="margin:8px 0 2px">Where the time per enquiry goes (all its replies together):</p>
       <div class="est-parts">
         <span>Reading the customer's emails <b>${num(p.reading, 1)} min</b></span>
         <span>Writing the replies <b>${num(p.writing, 1)} min</b></span>
@@ -761,8 +765,8 @@
       const minutes = results.reduce((a, x) => a + x.minutes, 0) / results.length;
       const replies = results.reduce((a, x) => a + (x.replies || 0), 0);
       estimate = { minutes, parts, n: results.length, usedAi, notes, at: Date.now(), repliesPerEnquiry: replies / results.length, perReply: replies ? results.reduce((a, x) => a + x.minutes, 0) / replies : minutes };
-      form.minsA.value = String(Math.round(minutes * 2) / 2);
-      setStatus(`Estimated about ${num(minutes, 1)} minutes per enquiry and filled it in. Check it against a stopwatch on a few replies.`, 'ok');
+      form.minsA.value = String(Math.round(estimate.perReply * 2) / 2);
+      setStatus(`Estimated about ${num(estimate.perReply, 1)} minutes per reply and filled it in. Check it against a stopwatch on a few replies.`, 'ok');
       if (profileId) saveProfile();
       if (audit) render();
     } catch (err) {
@@ -989,7 +993,7 @@
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
-    const rows = [['Enquiry #', 'Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'Estimated minutes by hand', 'What the replies needed', 'AI check', 'Reason not counted / note',
+    const rows = [['Enquiry #', 'Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'Estimated minutes by hand (whole conversation)', 'What the replies needed', 'AI check', 'Reason not counted / note',
       ...(texts ? ["Customer's enquiry (email text)", "Business's first reply (email text)", 'Rest of the conversation'] : [])]];
     for (const e of audit.result.enquiries.filter((x) => !countedOnly || x.include).sort((a, b) => a.receivedAt - b.receivedAt)) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
@@ -1049,7 +1053,7 @@
     for (const e of r.enquiries) e.existing = Boolean(e.customerEmail) && known.has(e.customerEmail.toLowerCase());
     const own = periods().map((p) => {
       const list = r.enquiries.filter((e) => e.include && e.receivedAt >= p.from && e.receivedAt < p.to);
-      return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerEnquiry: p.mins }) };
+      return { p, list, m: M.compute(list, { ...w, from: p.from, to: p.to, minutesPerReply: p.mins }) };
     });
     const base = baselineStat();
     return base && own.length === 1 ? [base, ...own] : own;
@@ -1283,7 +1287,7 @@
         noEmailReplyFound: m.unreplied, websiteFormsWithoutCustomerAddress: m.unmatchable,
         arrivedOutOfHours: m.outOfHours, emailsPerEnquiry: r1(m.avgEmails), viaWebsiteForm: m.viaForm,
         busiestDay: busiest(m.byWeekday, DAYS), busiestHour: busiest(m.byHour, m.byHour.map((_, h) => `${h}:00`)),
-        minutesPerEnquiry: m.minutesPerEnquiry, hoursPerMonthOnEnquiries: r1(m.hoursPerMonth), hoursPerWeekOnEnquiries: r1(m.hoursPerWeek), hoursPerYearOnEnquiries: m.hoursPerYear == null ? null : Math.round(m.hoursPerYear),
+        minutesPerReply: m.minutesPerReply, repliesPerMonth: r1(m.repliesPerMonth), repliesPerEnquiry: r1(m.repliesPerEnquiry), hoursPerMonthOnEnquiries: r1(m.hoursPerMonth), hoursPerWeekOnEnquiries: r1(m.hoursPerWeek), hoursPerYearOnEnquiries: m.hoursPerYear == null ? null : Math.round(m.hoursPerYear),
         customersWentQuietAfterReply: m.wentQuiet, quietCustomersChased: m.chased, quietCustomersNotChased: m.notChased,
         replyQualityOutOf5: r1(m.avgQuality), repliesQualityChecked: m.qualityScored,
         replyQualityChecksPassedPct: m.qualityScored ? Object.fromEntries(M.QUALITY_KEYS.map((k) => [M.QUALITY_LABELS[k], pc(m.qualityShare[k])])) : null,
@@ -1384,7 +1388,7 @@
       charts.push(C.vbar({ title: 'Quality of replies (out of 5)', takeaway: first.avgQuality != null && last.avgQuality != null ? `From <b>${num(first.avgQuality, 1)}</b> to <b>${num(last.avgQuality, 1)}</b>. Higher is better.` : 'Checked by AI. Higher is better.', rows: rows((m) => (m.avgQuality == null ? 0 : Math.round(m.avgQuality * 10) / 10)), series: [{ name: 'Quality', cls: 'after' }], legendSeries: legend, unit: '', format: (v) => (v ? `${num(v, 1)}/5` : '–') }));
     }
     if (runs.some((r) => r.metrics.hoursPerMonth != null)) {
-      charts.push(C.vbar({ title: 'Time spent on enquiries a month', takeaway: 'Based on the minutes per enquiry you entered. Lower is better.', rows: rows((m) => Math.round((m.hoursPerMonth || 0) * 10) / 10), series: [{ name: 'Hours', cls: 'after' }], legendSeries: legend, unit: 'hours', format: (v) => `${num(v, 1)} hrs` }));
+      charts.push(C.vbar({ title: 'Time spent on enquiries a month', takeaway: 'Replies written x the minutes per reply you entered. Lower is better.', rows: rows((m) => Math.round((m.hoursPerMonth || 0) * 10) / 10), series: [{ name: 'Hours', cls: 'after' }], legendSeries: legend, unit: 'hours', format: (v) => `${num(v, 1)} hrs` }));
     }
     return `<h3 class="section-title">Progress since go-live</h3><div class="charts-grid progress-grid">${charts.join('')}</div><h3 class="section-title">This audit</h3>`;
   }
@@ -1469,8 +1473,8 @@
     ['Arrived out of hours', (m) => num(m.outOfHours), (m) => (m.count ? `${pct(m.outOfHours / m.count)} of enquiries` : '')],
     ['Emails per enquiry', (m) => num(m.avgEmails, 1), () => 'both directions'],
     ['From the website form', (m) => num(m.viaForm), (m) => (m.count ? `${pct(m.viaForm / m.count)} of enquiries` : '')],
-    ['Time spent a month', (m) => (m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`), (m) => (m.minutesPerEnquiry ? `${num(m.hoursPerWeek, 1)} hrs a week · <b>${num(m.hoursPerYear, 0)} hrs a year</b> · at ${num(m.minutesPerEnquiry, 1)} min an enquiry${estimate && !estimate.edited && Number(form.minsA.value) === m.minutesPerEnquiry ? ' (estimated from the emails)' : ''}` : 'enter minutes per enquiry above')],
-    ['Time spent a year', (m) => (m.hoursPerYear == null ? '–' : `${num(m.hoursPerYear, 0)} hrs`), (m) => (m.hoursPerYear == null ? 'enter minutes per enquiry above' : `${workDays(m.hoursPerYear)} a year (7.5-hour days)`)],
+    ['Time spent a month', (m) => (m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`), (m) => (m.minutesPerReply ? `${num(m.hoursPerWeek, 1)} hrs a week · <b>${num(m.hoursPerYear, 0)} hrs a year</b> · ${num(m.repliesPerMonth, 0)} replies a month at ${num(m.minutesPerReply, 1)} min each${estimate && !estimate.edited && Number(form.minsA.value) === m.minutesPerReply ? ' (estimated from the emails)' : ''}` : 'enter minutes per reply above')],
+    ['Time spent a year', (m) => (m.hoursPerYear == null ? '–' : `${num(m.hoursPerYear, 0)} hrs`), (m) => (m.hoursPerYear == null ? 'enter minutes per reply above' : `${workDays(m.hoursPerYear)} a year (7.5-hour days)`)],
   ];
 
   function tiles(m) {
@@ -1523,7 +1527,7 @@
     if (m.medianReplyHours != null) parts.push(`Half were answered within <b>${M.duration(m.medianReplyHours)}</b>${m.medianWorkingReplyHours != null ? ` (${M.duration(m.medianWorkingReplyHours)} of working time)` : ''}, and ${pct(m.within1h)} within an hour.`);
     if (m.unreplied) parts.push(`<b>${m.unreplied}</b> got no email reply that we could find.`);
     if (m.outOfHours) parts.push(`${pct(m.outOfHours / m.count)} arrived outside opening hours.`);
-    if (m.hoursPerMonth != null) parts.push(`At ${num(m.minutesPerEnquiry, 1)} minutes each, that's about <b>${num(m.hoursPerWeek, 1)} hours a week</b>, <b>${num(m.hoursPerMonth, 1)} hours a month</b> or <b>${num(m.hoursPerYear, 0)} hours a year</b> spent on enquiries.`);
+    if (m.hoursPerMonth != null) parts.push(`The business wrote about ${num(m.repliesPerMonth, 0)} replies a month (${num(m.repliesPerEnquiry, 1)} per enquiry). At ${num(m.minutesPerReply, 1)} minutes a reply, that's about <b>${num(m.hoursPerWeek, 1)} hours a week</b>, <b>${num(m.hoursPerMonth, 1)} hours a month</b> or <b>${num(m.hoursPerYear, 0)} hours a year</b> spent on enquiries.`);
     return parts.join(' ');
   }
 
@@ -1531,11 +1535,14 @@
     if (stats.length < 2) return '';
     const [a, b] = stats;
     if (!a.m.count || !b.m.count) return '<p class="hint">Both periods need enquiries before they can be compared.</p>';
-    if (a.m.minutesPerEnquiry == null || b.m.minutesPerEnquiry == null) return '<p class="hint">Enter minutes per enquiry for both periods to show the time saved.</p>';
-    // Time saved on the enquiries that actually came in after: old minutes vs new minutes each.
-    const saved = (b.m.perMonth * (a.m.minutesPerEnquiry - b.m.minutesPerEnquiry)) / 60;
+    if (a.m.minutesPerReply == null || b.m.minutesPerReply == null) return '<p class="hint">Enter minutes per reply for both periods to show the time saved.</p>';
+    // The after period's enquiries handled the old way (same replies per enquiry as before,
+    // old minutes per reply), minus the time actually spent with the app. The app's extra
+    // automatic follow-ups aren't counted as "saved" work nobody would have done.
+    const oldWay = (b.m.perMonth * a.m.repliesPerEnquiry * a.m.minutesPerReply) / 60;
+    const saved = oldWay - b.m.hoursPerMonth;
     const perYear = saved * 365 / 30;
-    return `<p class="headline">${saved >= 0 ? `About <b>${num(saved, 1)} hours a month saved</b>, or <b>${num(perYear, 0)} hours a year</b> (${workDays(perYear)}),` : `About ${num(-saved, 1)} hours a month more`} on enquiries (${num(b.m.perMonth)} enquiries a month at ${num(b.m.minutesPerEnquiry, 1)} min each instead of ${num(a.m.minutesPerEnquiry, 1)})${a.m.medianReplyHours && b.m.medianReplyHours ? `, with typical replies going from ${M.duration(a.m.medianReplyHours)} to ${M.duration(b.m.medianReplyHours)}` : ''}.</p>`;
+    return `<p class="headline">${saved >= 0 ? `About <b>${num(saved, 1)} hours a month saved</b>, or <b>${num(perYear, 0)} hours a year</b> (${workDays(perYear)}),` : `About ${num(-saved, 1)} hours a month more`} on enquiries (${num(b.m.perMonth)} enquiries a month would take about ${num(oldWay, 1)} hrs the old way, at ${num(a.m.repliesPerEnquiry, 1)} replies each and ${num(a.m.minutesPerReply, 1)} min a reply; with the app it took ${num(b.m.hoursPerMonth, 1)} hrs)${a.m.medianReplyHours && b.m.medianReplyHours ? `, with typical replies going from ${M.duration(a.m.medianReplyHours)} to ${M.duration(b.m.medianReplyHours)}` : ''}.</p>`;
   }
 
   function table(r, ps, w) {
