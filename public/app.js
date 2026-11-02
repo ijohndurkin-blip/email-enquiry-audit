@@ -868,14 +868,17 @@
     download(`${fileBase()}.csv`, 'text/csv', toCsv(summaryRows()));
   }
 
-  /** The enquiry summary, optionally with each enquiry's emails (texts: map from fetchTexts). */
-  function summaryRows(texts) {
+  /**
+   * The enquiry summary, optionally with each enquiry's emails (texts: map from fetchTexts).
+   * countedOnly: just the real enquiries (what's ticked on the Counted tab).
+   */
+  function summaryRows(texts, { countedOnly = false } = {}) {
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
     const rows = [['Enquiry #', 'Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'AI check', 'Reason not counted / note',
       ...(texts ? ["Customer's enquiry (email text)", "Business's first reply (email text)", 'Rest of the conversation'] : [])]];
-    for (const e of audit.result.enquiries.slice().sort((a, b) => a.receivedAt - b.receivedAt)) {
+    for (const e of audit.result.enquiries.filter((x) => !countedOnly || x.include).sort((a, b) => a.receivedAt - b.receivedAt)) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
       const w = work();
       rows.push([
@@ -912,8 +915,10 @@
 
   function exportSummaryWithEmails() {
     runExport('enquiries with emails', async () => {
-      const { texts, note } = await fetchTexts(audit.result.enquiries.flatMap((e) => e.msgs || []), 'enquiries with emails');
-      download(`${fileBase()}-enquiries-with-emails.csv`, 'text/csv', toCsv(summaryRows(texts)));
+      const counted = audit.result.enquiries.filter((e) => e.include);
+      if (!counted.length) throw new Error('there are no counted enquiries');
+      const { texts, note } = await fetchTexts(counted.flatMap((e) => e.msgs || []), 'enquiries with emails');
+      download(`${fileBase()}-enquiries-with-emails.csv`, 'text/csv', toCsv(summaryRows(texts, { countedOnly: true })));
       return note;
     });
   }
@@ -958,9 +963,9 @@
           <details class="dl-menu">
             <summary class="button secondary">${exportBusy ? '<span class="spinner"></span>' : ''}Download ▾</summary>
             <div class="dl-list">
-              <button type="button" data-act="csv"><b>Enquiries summary (CSV)</b><small>One row per enquiry: dates, reply times, status, outcome, quality.</small></button>
-              <button type="button" data-act="csv-summary-text"${exportBusy ? ' disabled' : ''}><b>Enquiries summary with emails (CSV)</b><small>The same one row per enquiry, plus the customer's email, the business's reply and the rest of the conversation in full.</small></button>
-              <button type="button" data-act="csv-convo"${exportBusy ? ' disabled' : ''}><b>Conversations with email text (CSV)</b><small>Every enquiry with each customer email and business reply in full.</small></button>
+              <button type="button" data-act="csv"><b>Enquiries summary (CSV)</b><small>One row per enquiry: dates, reply times, status, outcome, quality. Includes the not-counted ones (marked "no"), for checking.</small></button>
+              <button type="button" data-act="csv-summary-text"${exportBusy ? ' disabled' : ''}><b>Enquiries with emails (CSV)</b><small>Just the counted enquiries, one row each, with the customer's email, the business's reply and the rest of the conversation in full.</small></button>
+              <button type="button" data-act="csv-convo"${exportBusy ? ' disabled' : ''}><b>Conversations with email text (CSV)</b><small>One row per email in every enquiry, counted and not, for checking how emails were sorted.</small></button>
               <button type="button" data-act="csv-all"${exportBusy || !audit.result.log ? ' disabled' : ''}><b>All emails with text (CSV)</b><small>${audit.result.log ? 'Every email the audit read, with what it decided about each one. Use it to spot missed enquiries.' : 'Run the audit again to get this (not kept in saved audits).'}</small></button>
             </div>
           </details>
