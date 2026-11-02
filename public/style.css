@@ -384,3 +384,8 @@ select.outcome { width: auto; margin: 0; padding: 4px 6px; font-size: 13px; }
 .dl-list b { display: block; color: var(--heading); font-size: 14px; }
 .dl-list small { display: block; font-size: 12.5px; }
 @media (max-width: 600px) { .dl-list { right: auto; left: 0; } }
+
+.missed { border-left: 4px solid var(--warn); }
+.missed h3 { display: flex; align-items: center; gap: 10px; }
+.missed .badge { flex: 0 0 auto; }
+.missed ul { margin: 6px 0 10px; padding-left: 20px; }

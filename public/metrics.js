@@ -138,6 +138,7 @@
       lost,
       winRate: won + lost ? won / (won + lost) : null,
       existingCustomers: enquiries.filter((e) => e.existing).length,
+      misdirected: enquiries.filter((e) => !e.firstReplyAt && e.misdirected && e.misdirected.length).length,
       qualityScored: scored.length,
       avgQuality: scored.length ? scored.reduce((a, e) => a + e.quality.score, 0) / scored.length : null,
       qualityShare,
@@ -162,7 +163,7 @@
    */
   function conversationState(e, asOf = Date.now()) {
     if (e.replyMatchable === false) return 'unknown';
-    if (!e.firstReplyAt) return 'no-reply';
+    if (!e.firstReplyAt) return e.misdirected && e.misdirected.length ? 'misdirected' : 'no-reply';
     const lastOut = e.lastOutboundAt || e.firstReplyAt;
     if (e.lastInboundAt > lastOut) return 'waiting';
     if (asOf - lastOut < QUIET_DAYS * DAY) return 'ongoing';
@@ -171,6 +172,7 @@
   }
   const STATE_LABELS = {
     'no-reply': 'No reply found',
+    misdirected: 'Reply went to your own address',
     waiting: 'Waiting for your reply',
     ongoing: 'In progress',
     'quiet-chased': 'Went quiet: chased',

@@ -38,6 +38,7 @@ module.exports = async function handler(req, res) {
   }, since, {
     // With AI sorting on, also read the first lines of each possible enquiry.
     withText: Boolean(body.withText),
+    allFolders: body.allFolders !== false, // also read Archive and the business's own folders
     otherAddresses: String(body.otherAddresses || '').split(/[\s,;]+/).filter(Boolean),
   })));
 
@@ -52,7 +53,7 @@ module.exports = async function handler(req, res) {
   if (!mailboxes.some((m) => m.ok)) return send(res, 422, { error: 'Couldn\'t read any of the mailboxes.', mailboxes });
 
   const messages = results.flatMap((r) => (r.status === 'fulfilled' ? r.value.messages : []));
-  const { enquiries, stats, log } = buildEnquiries(messages, {
+  const { enquiries, stats, log, possibleMissed } = buildEnquiries(messages, {
     from, to,
     mailboxes: accounts.map((a) => a.email),
     otherAddresses: String(body.otherAddresses || '').split(/[\s,;]+/).filter(Boolean),
@@ -66,5 +67,6 @@ module.exports = async function handler(req, res) {
     stats,
     enquiries,
     log, // what was decided about every email read (for the "all emails" download)
+    possibleMissed, // people the business replied to whose enquiry wasn't found
   });
 };

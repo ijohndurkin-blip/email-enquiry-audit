@@ -187,3 +187,48 @@ test('records what was decided about every email (for the all-emails download)',
   assert.match(by('Ancient')[0], /Before the audit period/);
   assert.strictEqual(log.length, 7);
 });
+
+test('a reply sent to the website-form address instead of the customer is flagged', () => {
+  // Like Ian Kelly: the form email comes from the business's own domain, the customer is in the text.
+  const form = inMsg(T0, 'john@darryn.co.uk', 'New message from Ian Kelly', { messageId: '<form1@darryn.co.uk>' });
+  form.bodyEmails = ['ian@plusdane.co.uk'];
+  form.uid = 3; form.folder = 'INBOX';
+  const wrong = outMsg(T0 + H, 'john@darryn.co.uk', 'Re: New message from Ian Kelly');
+  wrong.inReplyTo = '<form1@darryn.co.uk>'; wrong.uid = 8; wrong.folder = 'Sent';
+  const { enquiries, log } = buildEnquiries([form, wrong], opts);
+  assert.strictEqual(enquiries.length, 1);
+  const e = enquiries[0];
+  assert.strictEqual(e.customerEmail, 'ian@plusdane.co.uk');
+  assert.strictEqual(e.firstReplyAt, null); // the customer never got it
+  assert.strictEqual(e.misdirected.length, 1);
+  assert.match(e.note, /instead of the customer/);
+  assert.match(log.find((l) => l.kind === 'out').status, /sent to the business's own address/);
+});
+
+test('a reply that reaches the customer at another address counts, via the reply chain', () => {
+  const q = inMsg(T0, 'sam@work.co.uk', 'Quote', { messageId: '<q9@w>' });
+  const r = outMsg(T0 + 2 * H, 'sam.personal@gmail.com', 'Re: Quote');
+  r.inReplyTo = '<q9@w>';
+  const { enquiries } = buildEnquiries([q, r], opts);
+  assert.strictEqual(enquiries[0].firstReplyAt - enquiries[0].receivedAt, 2 * H);
+});
+
+test('replies to people with no enquiry in the mailbox are listed as possible missed enquiries', () => {
+  // Like Jamie Siddall: the business replied and followed up, but the original enquiry isn't in this mailbox.
+  const r1 = outMsg(T0, 'jamie@hotmail.com', 'Re: I need a shop sign creating');
+  const r2 = outMsg(T0 + D, 'jamie@hotmail.com', 'Re: I need a shop sign creating');
+  const order = outMsg(T0, 'orders@supplier.co.uk', 'New order');
+  const { possibleMissed, log } = buildEnquiries([r1, r2, order], opts);
+  assert.deepStrictEqual(possibleMissed.map((x) => [x.to, x.subject, x.replies]), [['jamie@hotmail.com', 'I need a shop sign creating', 2]]);
+  assert.match(log.find((l) => l.subject === 'New order').status, /not a reply to any enquiry/);
+});
+
+test('picks Archive and own folders, skips Sent, Trash, Spam and Gmail All Mail', () => {
+  const { otherFolders } = require('../lib/mailbox');
+  const f = (path, specialUse, flags = new Set()) => ({ path, name: path.split(/[./]/).pop(), specialUse, flags });
+  const picked = otherFolders([
+    f('INBOX'), f('INBOX.Sent', '\\Sent'), f('Sent Items'), f('Drafts', '\\Drafts'), f('Trash'), f('Junk', '\\Junk'),
+    f('[Gmail]/All Mail', '\\All'), f('[Gmail]', undefined, new Set(['\\Noselect'])), f('Archive', '\\Archive'), f('INBOX.Quotes'), f('Customers 2026'),
+  ], 'INBOX.Sent');
+  assert.deepStrictEqual(picked, ['Archive', 'INBOX.Quotes', 'Customers 2026']);
+});

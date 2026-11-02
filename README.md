@@ -89,6 +89,13 @@ Results open in three tabs, written for business owners rather than analysts. **
   Each chart has a one-line takeaway, numbers on the bars, details when you hover over a bar, and a "Show the numbers" table. When comparing periods, "Before" is blue and "After" is cyan. These colours were checked so people with colour blindness can tell them apart, in both light and dark mode.
 - **Enquiries:** the Counted and Not counted lists, with ticking and "Never count…".
 
+## Replies that went astray, and enquiries the audit can't see
+
+- **Replies sent to the business's own address:** replies are matched by the customer's address *and* by the email reply chain (In-Reply-To / References). If the business pressed Reply on a website-form notification, the reply goes to the website's own address, not the customer. That reply is shown as **"Reply went to your own address"**, and "At a glance" flags **Replies that never reached the customer**. A reply that reached the customer at a different address of theirs is counted normally.
+- **Possible missed enquiries:** if the business replied to someone ("Re: …") whose original enquiry isn't in any audited mailbox, they're listed on the Summary tab. The enquiry usually came in another way: another email address, a website form or forwarding that doesn't send to this mailbox, or it was deleted.
+- **Other folders:** by default the audit also reads Archive and the business's own folders, not only the inbox, so filed enquiries are found. It skips Sent, Drafts, Trash, Spam and Gmail's "All Mail". You can turn this off under More options.
+- **Reply quality** judges the first reply against **everything the customer sent before it**, including subject lines, because the question is often only in the subject.
+
 ## Downloads
 
 The **Download** menu above the results has three files:

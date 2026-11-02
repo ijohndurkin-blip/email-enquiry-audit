@@ -443,7 +443,7 @@
     form.compare.addEventListener('change', syncCompare);
 
     // Changing hours, minutes or periods re-works the numbers without reading the mailboxes again.
-    ['tz', 'workStart', 'workEnd', 'minsA', 'minsB', 'aFrom', 'aTo', 'bFrom', 'bTo', 'compare', 'businessName', 'otherAddresses', 'ignoreSenders', 'about', 'useAi'].forEach((n) => form[n].addEventListener('change', () => {
+    ['tz', 'workStart', 'workEnd', 'minsA', 'minsB', 'aFrom', 'aTo', 'bFrom', 'bTo', 'compare', 'businessName', 'otherAddresses', 'ignoreSenders', 'about', 'useAi', 'allFolders'].forEach((n) => form[n].addEventListener('change', () => {
       if (audit) render();
       if (profileId) saveProfile();
     }));
@@ -548,6 +548,7 @@
         otherAddresses: form.otherAddresses.value,
         ignoreSenders: form.ignoreSenders.value,
         withText: useAi(),
+        allFolders: form.allFolders.checked,
       });
       runMeta = meta;
       audit = { result: data, withText: useAi(), meta };
@@ -620,7 +621,7 @@
   // --- Reply quality ---------------------------------------------------------------------
 
   const qualityCandidates = () => (audit ? audit.result.enquiries.filter((e) => e.include && e.firstReplyAt && !e.quality
-    && (e.msgs || []).some((m) => m.d === 'in') && (e.msgs || []).some((m) => m.d === 'out')) : []);
+    && (e.msgs || []).some((m) => m.d === 'in') && (e.msgs || []).some((m) => m.d === 'out' && !m.mis)) : []);
   let qualityBusy = false;
 
   async function checkQuality() {
@@ -640,7 +641,10 @@
         const batch = todo.slice(i, i + 8);
         const r = await api('/api/quality', {
           business, mailboxes,
-          items: batch.map((e) => ({ id: e.id, subject: e.subject, in: e.msgs.find((m) => m.d === 'in'), out: e.msgs.find((m) => m.d === 'out') })),
+          items: batch.map((e) => {
+            const out = e.msgs.find((m) => m.d === 'out' && !m.mis);
+            return { id: e.id, subject: e.subject, ins: e.msgs.filter((m) => m.d === 'in' && m.at <= out.at).slice(-5), out };
+          }),
         });
         for (const v of r.results || []) {
           const e = audit.result.enquiries.find((x) => x.id === v.id);
@@ -708,6 +712,7 @@
       minsA: form.minsA.value, minsB: form.minsB.value,
       mailboxes: Mailboxes.snapshot({ tokens }), // passwords are never saved
       otherAddresses: form.otherAddresses.value, ignoreSenders: form.ignoreSenders.value,
+      allFolders: form.allFolders.checked,
       customers,
     };
   }
@@ -727,6 +732,7 @@
     ['businessName', 'about', 'aFrom', 'aTo', 'bFrom', 'bTo', 'minsA', 'minsB', 'workStart', 'workEnd', 'otherAddresses', 'ignoreSenders'].forEach((k) => { if (s[k] != null) form[k].value = s[k]; });
     if (s.tz) form.tz.value = s.tz;
     form.useAi.checked = Boolean(s.useAi);
+    form.allFolders.checked = s.allFolders !== false;
     if (Array.isArray(s.customers)) { customers = s.customers.filter((c) => c && c.email); renderCustomers(); }
     form.compare.checked = Boolean(s.compare);
     if (Array.isArray(s.workDays)) $('#workDays').querySelectorAll('input').forEach((i) => { i.checked = s.workDays.includes(Number(i.value)); });
@@ -937,6 +943,7 @@
       <section class="panel${view === 'summary' ? '' : ' screen-hidden'}" data-panel="summary">
         ${mailboxNotes(r)}
         ${glance(stats)}
+        ${missedCard(r)}
         ${summaryCard(stats)}
         ${stats.length === 1 ? tiles(stats[0].m) : compareTable(stats)}
         ${progressTable()}
@@ -1017,6 +1024,9 @@
       const s = m.unreplied === 0 ? 'good' : share <= 0.1 ? 'warn' : 'bad';
       out.push({ s, title: 'Enquiries without a reply', text: m.unreplied === 0 ? 'Every enquiry got an email reply.' : `${m.unreplied} of ${m.replied + m.unreplied} enquiries got no email reply that we could see. Some may have been phoned back, but each one could be a lost job.` });
     }
+    if (m.misdirected) {
+      out.push({ s: 'bad', title: 'Replies that never reached the customer', text: `${m.misdirected} repl${m.misdirected === 1 ? 'y was' : 'ies were'} sent to the business's own address instead of the customer, usually by pressing Reply on a website-form email. The customer never got it.` });
+    }
     if (m.qualityScored) {
       const q = m.avgQuality;
       const weakest = M.QUALITY_KEYS.filter((k) => m.qualityShare[k] != null).sort((a, b) => m.qualityShare[a] - m.qualityShare[b])[0];
@@ -1058,6 +1068,19 @@
     </div>`;
   }
 
+  /** People the business replied to whose original enquiry wasn't in the audited mailboxes. */
+  function missedCard(r) {
+    const list = r.possibleMissed || [];
+    if (!list.length) return '';
+    const d = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    return `<div class="card missed">
+      <h3><span class="badge warn"><b aria-hidden="true">!</b>Check</span> Possible missed enquiries (${list.length})</h3>
+      <p>The business replied to ${list.length === 1 ? 'this person' : 'these people'}, but ${list.length === 1 ? 'their' : 'the'} original enquiry wasn't found in the audited mailbox${r.mailboxes.length > 1 ? 'es' : ''}, so ${list.length === 1 ? 'it isn\'t' : 'they aren\'t'} counted:</p>
+      <ul>${list.map((x) => `<li><b>${esc(x.to)}</b>: "${esc(x.subject || '(no subject)')}" · first reply ${d(x.first)}${x.replies > 1 ? ` · ${x.replies} emails sent` : ''}</li>`).join('')}</ul>
+      <p class="hint">Usually the enquiry came in another way: to a different email address (add that mailbox), through a website form or forwarding that doesn't send to this mailbox, or it was deleted. The "All emails" download shows these as "Possible missed enquiry".</p>
+    </div>`;
+  }
+
   // --- AI summary (numbers only) -------------------------------------------------------------
 
   function summaryStats(stats) {
@@ -1080,7 +1103,8 @@
         customersWentQuietAfterReply: m.wentQuiet, quietCustomersChased: m.chased, quietCustomersNotChased: m.notChased,
         replyQualityOutOf5: r1(m.avgQuality), repliesQualityChecked: m.qualityScored,
         replyQualityChecksPassedPct: m.qualityScored ? Object.fromEntries(M.QUALITY_KEYS.map((k) => [M.QUALITY_LABELS[k], pc(m.qualityShare[k])])) : null,
-        customersWaitingOnReply: m.customerWaiting, markedWon: m.won, markedLost: m.lost, fromExistingCustomers: m.existingCustomers,
+        customersWaitingOnReply: m.customerWaiting, repliesSentToOwnAddressNotCustomer: m.misdirected,
+        possibleMissedEnquiriesNotInMailbox: (audit.result.possibleMissed || []).length, markedWon: m.won, markedLost: m.lost, fromExistingCustomers: m.existingCustomers,
       })),
     };
   }
@@ -1354,7 +1378,7 @@
           const reply = !e.replyMatchable ? '<span class="muted">can\'t tell</span>' : (h == null ? '<span class="bad">none found</span>' : `${M.duration(h)}<small>${M.duration(M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000)} working</small>${q}`);
           const period = ps.length > 1 ? (ps.find((p) => e.receivedAt >= p.from && e.receivedAt < p.to) || {}).label : '';
           const state = M.conversationState(e, asOf);
-          const stateCls = { waiting: 'bad', 'quiet-not-chased': 'warn-text', 'no-reply': 'bad' }[state] || '';
+          const stateCls = { waiting: 'bad', 'quiet-not-chased': 'warn-text', 'no-reply': 'bad', misdirected: 'bad' }[state] || '';
           const emails = e.inboundCount + e.outboundCount;
           const note = e.ai ? `AI: ${e.ai.reason}` : e.note;
           return `<tr>
@@ -1396,8 +1420,8 @@
           <ul>${M.QUALITY_KEYS.map((k) => `<li class="${e.quality.checks[k] ? 'yes' : 'no'}"><b aria-hidden="true">${e.quality.checks[k] ? '✓' : '✕'}</b> ${esc(M.QUALITY_LABELS[k])}<span class="sr-only">: ${e.quality.checks[k] ? 'yes' : 'no'}</span></li>`).join('')}</ul>
           ${e.quality.tip ? `<p><b>Tip:</b> ${esc(e.quality.tip)}</p>` : ''}</div>` : '';
       body.innerHTML = `${qc}${(r.problems || []).map((p) => `<p class="bad">${esc(p)}</p>`).join('')}
-        ${r.messages.map((m) => `<article class="mail ${m.direction}">
-          <header><span class="who">${m.direction === 'out' ? 'Business' : 'Customer'}</span>
+        ${r.messages.map((m, i) => `<article class="mail ${m.direction}">
+          <header><span class="who">${m.direction === 'out' ? ((e.msgs[i] || {}).mis ? 'Business: sent to its own address, not the customer' : 'Business') : 'Customer'}</span>
             <span class="muted">${m.date ? esc(new Date(m.date).toLocaleString('en-GB', { timeZone: w.tz, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : ''}</span></header>
           ${m.missing ? '<p class="muted">This email couldn\'t be found any more (it may have been moved or deleted).</p>' : `
             <p class="mail-meta"><b>${esc(m.from)}</b> → ${esc(m.to)}<br>${esc(m.subject)}</p>
