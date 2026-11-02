@@ -73,3 +73,13 @@ test('follow-ups: quiet conversations, chased or not, and customers waiting', ()
   assert.strictEqual(m.existingCustomers, 1);
   assert.strictEqual(M.conversationState(list[3], now), 'ongoing');
 });
+
+test('reply quality averages and the most-missed check', () => {
+  const from = london(2026, 10, 1, 0);
+  const e = (score, nextStep) => ({ receivedAt: from + H, firstReplyAt: from + 2 * H, inboundCount: 1, outboundCount: 1, mailboxes: [], quality: { score, checks: { answered: true, next_step: nextStep, asked_details: true, friendly: true, clear: score > 3 } } });
+  const m = M.compute([e(5, true), e(3, false), { receivedAt: from + H, inboundCount: 1, outboundCount: 0, mailboxes: [] }], { ...w, from, to: from + 30 * 24 * H });
+  assert.strictEqual(m.qualityScored, 2);
+  assert.strictEqual(m.avgQuality, 4);
+  assert.strictEqual(m.qualityShare.next_step, 0.5);
+  assert.strictEqual(m.qualityShare.answered, 1);
+});

@@ -89,6 +89,20 @@ Results open in three tabs, written for business owners rather than analysts. **
   Each chart has a one-line takeaway, numbers on the bars, details when you hover over a bar, and a "Show the numbers" table. When comparing periods, "Before" is blue and "After" is cyan. These colours were checked so people with colour blindness can tell them apart, in both light and dark mode.
 - **Enquiries:** the Counted and Not counted lists, with ticking and "Never count…".
 
+## Quality of replies (AI, optional)
+
+With AI turned on, each counted enquiry's **first reply from the business** is checked against five plain questions:
+
+1. Answered their question?
+2. Gave a price or a clear next step (quote, visit time, booking)?
+3. Asked for what's needed (phone number, address, photos) or gave an easy way to book or call?
+4. Friendly and professional?
+5. Clear and easy to read?
+
+Each reply gets a score out of 5 and a one-line tip. The report shows the average score, the check most often missed ("At a glance"), a badge on each enquiry, the five ticks and crosses in **View**, a before-and-after comparison, and a "Quality of replies" progress chart. It runs automatically after AI sorting, or later with **Check reply quality** (the mailbox must be connected).
+
+**What's sent:** the customer's first email and the business's first reply, read live from the mailbox, with quoted history trimmed and up to about 2,000 characters each. Only the scores and tips are kept.
+
 ## Follow-ups, outcomes and existing customers
 
 **Where each enquiry stands** is worked out from who emailed last:
@@ -185,6 +199,8 @@ AUDIT_ACCESS_KEY=test npm run dev      # http://localhost:3000
 | `public/charts.js` | The charts, in plain HTML/CSS with no library, so they print cleanly |
 | `api/store.js` / `lib/store.js` | Saved companies and audits in Supabase (server-side, secret key) |
 | `api/thread.js` | Opens one enquiry's emails on request (read-only, nothing stored) |
+| `api/quality.js` | Checks the quality of first replies with AI (scores and tips only are returned) |
+| `lib/bodies.js` | Reads specific emails' text from a mailbox on request (read-only) |
 | `lib/secret.js` | Encrypts and decrypts saved connections (AES-256-GCM) |
 | `public/mailboxes.js` | Mailbox cards: test connection, saved connections, Sent folder choice |
 | `lib/discover.js` | Finds IMAP settings from an email address (ported from the enquiry app); certificate-name retry, STARTTLS on port 143, lockout-safe sign-in |

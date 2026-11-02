@@ -103,6 +103,10 @@
       if (state === 'waiting') waiting += 1;
     }
     const won = enquiries.filter((e) => e.outcome === 'won').length;
+    // Reply quality (AI checks on the business's first reply, out of 5).
+    const scored = enquiries.filter((e) => e.quality && Number.isFinite(e.quality.score));
+    const qualityShare = {};
+    for (const k of QUALITY_KEYS) qualityShare[k] = scored.length ? scored.filter((e) => e.quality.checks && e.quality.checks[k]).length / scored.length : null;
     const lost = enquiries.filter((e) => e.outcome === 'lost').length;
     const mins = Number(o.minutesPerEnquiry);
     return {
@@ -134,11 +138,22 @@
       lost,
       winRate: won + lost ? won / (won + lost) : null,
       existingCustomers: enquiries.filter((e) => e.existing).length,
+      qualityScored: scored.length,
+      avgQuality: scored.length ? scored.reduce((a, e) => a + e.quality.score, 0) / scored.length : null,
+      qualityShare,
       minutesPerEnquiry: Number.isFinite(mins) && mins > 0 ? mins : null,
       hoursPerMonth: Number.isFinite(mins) && mins > 0 ? (perMonth(enquiries.length) * mins) / 60 : null,
     };
   }
 
+  const QUALITY_KEYS = ['answered', 'next_step', 'asked_details', 'friendly', 'clear'];
+  const QUALITY_LABELS = {
+    answered: 'Answered their question',
+    next_step: 'Gave a price or clear next step',
+    asked_details: 'Asked for what\'s needed or how to book',
+    friendly: 'Friendly and professional',
+    clear: 'Clear and easy to read',
+  };
   const QUIET_DAYS = 3;
   /**
    * Where a conversation stands:
@@ -207,5 +222,5 @@
     return weeks;
   }
 
-  return { compute, workingMs, localParts, localToUtc, median, duration, replyBuckets, weekly, BUCKETS, conversationState, STATE_LABELS, QUIET_DAYS };
+  return { compute, workingMs, localParts, localToUtc, median, duration, replyBuckets, weekly, BUCKETS, conversationState, STATE_LABELS, QUIET_DAYS, QUALITY_KEYS, QUALITY_LABELS };
 }));

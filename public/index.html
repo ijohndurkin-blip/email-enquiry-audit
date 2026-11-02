@@ -19,7 +19,7 @@
       <a class="brand" href="https://www.raresquaredlabs.co.uk" target="_blank" rel="noopener" aria-label="Rare Squared Labs website (opens in a new tab)"><img src="logo.png" alt="Rare Squared Labs" width="139" height="46"></a>
       <div class="top-text">
         <h1>Enquiry Audit</h1>
-        <p class="lede">Reads a business's enquiry mailboxes and shows how many enquiries came in, how quickly they were answered and how many were missed. It reads who each email is from and to, the subject and the time, never changes anything in the mailbox, and doesn't keep passwords. The only email text it reads is in website-form notifications (to find the customer's address) and, if you turn on AI sorting, the first lines of possible enquiries.</p>
+        <p class="lede">Reads a business's enquiry mailboxes and shows how many enquiries came in, how quickly they were answered and how many were missed. It reads who each email is from and to, the subject and the time, never changes anything in the mailbox, and doesn't keep passwords. The only email text it reads is in website-form notifications (to find the customer's address) and, if you turn on AI, the first lines of possible enquiries and the business's first reply to each.</p>
       </div>
     </div>
   </header>
@@ -107,7 +107,7 @@
       <section class="card run">
         <div id="aiRow" class="ai-row" hidden>
           <label class="check"><input type="checkbox" name="useAi"> <span><b>Use AI to check which emails are real enquiries</b><br>
-            <small>Sends the sender, subject and first few lines of each possible enquiry to Anthropic's Claude to sort out suppliers, personal emails and sales pitches. Nothing is stored. Costs a few pence per audit.</small></span></label>
+            <small>Sends the sender, subject and first few lines of each possible enquiry to Anthropic's Claude to sort out suppliers, personal emails and sales pitches, then checks the quality of the business's first reply to each one. Only the results are kept. Costs a few pence per audit.</small></span></label>
         </div>
         <p id="aiOff" class="hint" hidden>AI sorting is off. To turn it on, add an <code>ANTHROPIC_API_KEY</code> environment variable in Vercel and redeploy.</p>
         <div class="actions">

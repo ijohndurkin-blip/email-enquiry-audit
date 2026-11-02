@@ -359,7 +359,7 @@
 
   // --- Saving each audit -------------------------------------------------------------------
 
-  const runSignature = () => (audit ? JSON.stringify([audit.result.enquiries.filter((e) => e.include).map((e) => e.id), audit.result.enquiries.filter((e) => e.outcome).map((e) => `${e.id}:${e.outcome}`), audit.summary && audit.summary.at, form.minsA.value, form.minsB.value]) : '');
+  const runSignature = () => (audit ? JSON.stringify([audit.result.enquiries.filter((e) => e.include).map((e) => e.id), audit.result.enquiries.filter((e) => e.outcome).map((e) => `${e.id}:${e.outcome}`), audit.result.enquiries.filter((e) => e.quality).length, audit.summary && audit.summary.at, form.minsA.value, form.minsB.value]) : '');
   let runSaveTimer = null;
 
   /** Save (or update) the audit on screen for the open company. */
@@ -576,7 +576,7 @@
   async function aiSort() {
     if (aiBusy || !audit) return;
     const todo = aiCandidates();
-    if (!todo.length) { aiMessage = ''; render(); writeSummary(); return; }
+    if (!todo.length) { aiMessage = ''; render(); checkQuality(); return; }
     aiBusy = true;
     const business = { name: form.businessName.value.trim(), about: form.about.value.trim() };
     const BATCH = 15;
@@ -607,12 +607,53 @@
         done += batch.length;
       }
       aiMessage = `AI checked ${done} email${done === 1 ? '' : 's'} and moved ${moved} to Not counted. Check the Enquiries tab (Not counted) and tick any it got wrong.`;
-      writeSummary();
+      checkQuality();
     } catch (err) {
       aiMessage = `<span class="bad">${esc(err.message)}</span> The ${done} checked so far are kept; press "Check with AI" to try the rest.`;
     } finally {
       aiBusy = false;
       render();
+    }
+  }
+
+  // --- Reply quality ---------------------------------------------------------------------
+
+  const qualityCandidates = () => (audit ? audit.result.enquiries.filter((e) => e.include && e.firstReplyAt && !e.quality
+    && (e.msgs || []).some((m) => m.d === 'in') && (e.msgs || []).some((m) => m.d === 'out')) : []);
+  let qualityBusy = false;
+
+  async function checkQuality() {
+    if (qualityBusy || !audit || !aiStatus.ai) { writeSummary(); return; }
+    const todo = qualityCandidates();
+    if (!todo.length) { writeSummary(); return; }
+    const mailboxes = Mailboxes.forAudit().filter((m) => m.token);
+    if (!mailboxes.length) { writeSummary(); return; }
+    qualityBusy = true;
+    const keep = aiMessage;
+    const business = { name: form.businessName.value.trim(), about: form.about.value.trim() };
+    let done = 0;
+    try {
+      for (let i = 0; i < todo.length; i += 8) {
+        aiMessage = `${keep ? `${keep}<br>` : ''}<span class="spinner"></span> AI is checking the quality of the replies: ${done} of ${todo.length} done…`;
+        render();
+        const batch = todo.slice(i, i + 8);
+        const r = await api('/api/quality', {
+          business, mailboxes,
+          items: batch.map((e) => ({ id: e.id, subject: e.subject, in: e.msgs.find((m) => m.d === 'in'), out: e.msgs.find((m) => m.d === 'out') })),
+        });
+        for (const v of r.results || []) {
+          const e = audit.result.enquiries.find((x) => x.id === v.id);
+          if (e) e.quality = { score: v.score, checks: v.checks, tip: v.tip };
+        }
+        done += batch.length;
+      }
+      aiMessage = `${keep ? `${keep}<br>` : ''}AI checked the quality of ${done} repl${done === 1 ? 'y' : 'ies'}.`;
+    } catch (err) {
+      aiMessage = `${keep ? `${keep}<br>` : ''}<span class="bad">${esc(err.message)}</span>`;
+    } finally {
+      qualityBusy = false;
+      render();
+      writeSummary();
     }
   }
 
@@ -734,7 +775,7 @@
     const { tz } = work();
     const ps = periods();
     const fmt = (t) => (t ? new Date(t).toLocaleString('en-GB', { timeZone: tz }) : '');
-    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'AI check', 'Reason not counted / note']];
+    const rows = [['Counted', 'Period', 'Received', 'Customer name', 'Customer email', 'Subject', 'Mailbox(es)', 'Website form', 'First reply', 'Reply time (hours)', 'Reply time, working hours', 'Emails from customer', 'Emails from business', 'Where it stands', 'Outcome', 'Existing customer', 'Reply quality (out of 5)', 'Reply tip', 'AI check', 'Reason not counted / note']];
     for (const e of audit.result.enquiries) {
       const p = ps.find((x) => e.receivedAt >= x.from && e.receivedAt < x.to);
       const w = work();
@@ -743,7 +784,7 @@
         e.viaForm ? 'yes' : '', fmt(e.firstReplyAt),
         e.firstReplyAt ? ((e.firstReplyAt - e.receivedAt) / 3600000).toFixed(2) : '',
         e.firstReplyAt ? (M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000).toFixed(2) : '',
-        e.inboundCount, e.outboundCount, M.STATE_LABELS[M.conversationState(e, Date.parse(audit.result.generatedAt) || Date.now())] || '', e.outcome || '', e.existing ? 'yes' : '',
+        e.inboundCount, e.outboundCount, M.STATE_LABELS[M.conversationState(e, Date.parse(audit.result.generatedAt) || Date.now())] || '', e.outcome || '', e.existing ? 'yes' : '', e.quality ? e.quality.score : '', e.quality ? e.quality.tip : '',
         e.ai ? `${e.ai.label}: ${e.ai.reason}` : '', e.reason || e.note || '',
       ]);
     }
@@ -792,6 +833,7 @@
           <button type="button" class="secondary" data-act="save">Save audit file</button>
           <button type="button" class="secondary" data-act="print">Print / PDF</button>
           ${audit.withText && aiStatus.ai && !aiBusy && aiCandidates().length ? `<button type="button" class="primary" data-act="ai">Check ${aiCandidates().length} with AI</button>` : ''}
+          ${aiStatus.ai && !aiBusy && !qualityBusy && Mailboxes.connectedCount() && qualityCandidates().length ? `<button type="button" class="secondary" data-act="quality">Check reply quality (${qualityCandidates().length})</button>` : ''}
         </div>
       </div>
       ${aiMessage ? `<p class="ai-status no-print">${aiMessage}</p>` : ''}
@@ -826,6 +868,7 @@
       if (b.dataset.act === 'print') window.print();
       if (b.dataset.act === 'ai') aiSort();
       if (b.dataset.act === 'summary') writeSummary();
+      if (b.dataset.act === 'quality') checkQuality();
     }));
     resultsEl.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => { view = b.dataset.view; render(); }));
     resultsEl.querySelectorAll('[data-never]').forEach((b) => b.addEventListener('click', () => {
@@ -878,6 +921,13 @@
       const s = m.unreplied === 0 ? 'good' : share <= 0.1 ? 'warn' : 'bad';
       out.push({ s, title: 'Enquiries without a reply', text: m.unreplied === 0 ? 'Every enquiry got an email reply.' : `${m.unreplied} of ${m.replied + m.unreplied} enquiries got no email reply that we could see. Some may have been phoned back, but each one could be a lost job.` });
     }
+    if (m.qualityScored) {
+      const q = m.avgQuality;
+      const weakest = M.QUALITY_KEYS.filter((k) => m.qualityShare[k] != null).sort((a, b) => m.qualityShare[a] - m.qualityShare[b])[0];
+      const s = q >= 4 ? 'good' : q >= 3 ? 'warn' : 'bad';
+      const weakText = weakest && m.qualityShare[weakest] < 0.8 ? ` Most often missing: <b>${M.QUALITY_LABELS[weakest].toLowerCase()}</b> (only ${pct(m.qualityShare[weakest])} of replies).` : '';
+      out.push({ s, html: true, title: 'Quality of replies', text: `Replies scored <b>${num(q, 1)} out of 5</b> on average (${m.qualityScored} checked by AI against five simple checks).${weakText}` });
+    }
     if (m.wentQuiet) {
       const s = m.notChased === 0 ? 'good' : m.notChased / m.wentQuiet <= 0.25 ? 'warn' : 'bad';
       out.push({ s, title: 'Following up when customers go quiet', text: m.notChased === 0 ? `All ${m.wentQuiet} customers who went quiet after a reply were followed up. Well done.` : `${m.notChased} of ${m.wentQuiet} customers went quiet after the business replied and were never chased. A friendly follow-up a few days later often wins the job.` });
@@ -908,7 +958,7 @@
     return `<div class="card glance">
       <h3>At a glance${stats.length > 1 ? ` <small>(${esc(latest.p.label)} period)</small>` : ''}</h3>
       ${latest.m.count < 10 ? `<p class="hint">Only ${latest.m.count} enquir${latest.m.count === 1 ? 'y' : 'ies'} in this period, so treat these as a rough guide.</p>` : ''}
-      <ul class="checks">${list.map((c) => `<li class="check-item ck-${c.s}"><span class="badge ${c.s}"><b aria-hidden="true">${STATUS[c.s].icon}</b>${STATUS[c.s].word}</span><div><strong>${esc(c.title)}</strong><p>${esc(c.text)}</p></div></li>`).join('')}</ul>
+      <ul class="checks">${list.map((c) => `<li class="check-item ck-${c.s}"><span class="badge ${c.s}"><b aria-hidden="true">${STATUS[c.s].icon}</b>${STATUS[c.s].word}</span><div><strong>${esc(c.title)}</strong><p>${c.html ? c.text : esc(c.text)}</p></div></li>`).join('')}</ul>
     </div>`;
   }
 
@@ -922,7 +972,7 @@
     return {
       openingHours: `${w.workStart}–${w.workEnd}, ${w.workDays.map((d) => DAYS[d]).join(' ')}`,
       goLiveDate: current() && current().goLive ? current().goLive : null,
-      savedChecksSoFar: progressRuns().map((r) => ({ check: r.label, enquiries: r.metrics.count, typicalReplyHoursClock: r1(r.metrics.medianReplyHours), repliedWithin1HourPct: pc(r.metrics.within1h), noEmailReplyFound: r.metrics.unreplied })),
+      savedChecksSoFar: progressRuns().map((r) => ({ check: r.label, enquiries: r.metrics.count, typicalReplyHoursClock: r1(r.metrics.medianReplyHours), repliedWithin1HourPct: pc(r.metrics.within1h), noEmailReplyFound: r.metrics.unreplied, replyQualityOutOf5: r1(r.metrics.avgQuality) })),
       periods: stats.map(({ p, m }) => ({
         label: p.label, days: Math.round(m.days), enquiries: m.count, enquiriesPerMonth: r1(m.perMonth),
         typicalReplyHoursClock: r1(m.medianReplyHours), typicalReplyHoursOpeningHours: r1(m.medianWorkingReplyHours),
@@ -932,6 +982,8 @@
         busiestDay: busiest(m.byWeekday, DAYS), busiestHour: busiest(m.byHour, m.byHour.map((_, h) => `${h}:00`)),
         minutesPerEnquiry: m.minutesPerEnquiry, hoursPerMonthOnEnquiries: r1(m.hoursPerMonth),
         customersWentQuietAfterReply: m.wentQuiet, quietCustomersChased: m.chased, quietCustomersNotChased: m.notChased,
+        replyQualityOutOf5: r1(m.avgQuality), repliesQualityChecked: m.qualityScored,
+        replyQualityChecksPassedPct: m.qualityScored ? Object.fromEntries(M.QUALITY_KEYS.map((k) => [M.QUALITY_LABELS[k], pc(m.qualityShare[k])])) : null,
         customersWaitingOnReply: m.customerWaiting, markedWon: m.won, markedLost: m.lost, fromExistingCustomers: m.existingCustomers,
       })),
     };
@@ -990,7 +1042,7 @@
       <h3>Progress so far</h3>
       <p class="hint">Each saved check for this company, oldest first. "Before" is the period before the enquiry app.</p>
       <div class="scroll"><table class="list">
-        <thead><tr><th>Check</th><th>Dates</th><th>Enquiries a month</th><th>Typical reply</th><th>Replied within an hour</th><th>No reply found</th><th>Time spent a month</th></tr></thead>
+        <thead><tr><th>Check</th><th>Dates</th><th>Enquiries a month</th><th>Typical reply</th><th>Replied within an hour</th><th>No reply found</th><th>Reply quality</th><th>Time spent a month</th></tr></thead>
         <tbody>${runs.map((r) => {
           const m = r.metrics;
           const d = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
@@ -1001,6 +1053,7 @@
             <td>${M.duration(m.medianReplyHours)}</td>
             <td>${pct(m.within1h)}</td>
             <td>${m.unreplied ?? '–'}${m.replyRate != null ? ` <small>${pct(1 - m.replyRate)}</small>` : ''}</td>
+            <td>${m.avgQuality == null ? '–' : `${num(m.avgQuality, 1)}/5`}</td>
             <td>${m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`}</td>
           </tr>`;
         }).join('')}</tbody>
@@ -1023,6 +1076,9 @@
       C.vbar({ title: 'Replied within an hour', takeaway: `From <b>${pc((first.within1h || 0) * 100)}</b> to <b>${pc((last.within1h || 0) * 100)}</b>. Higher is better.`, rows: rows((m) => Math.round((m.within1h || 0) * 100)), series: [{ name: 'Within an hour', cls: 'after' }], legendSeries: legend, unit: '', format: pc }),
       C.vbar({ title: 'Enquiries with no reply found', takeaway: `From <b>${pc(first.replyRate != null ? (1 - first.replyRate) * 100 : 0)}</b> to <b>${pc(last.replyRate != null ? (1 - last.replyRate) * 100 : 0)}</b> of enquiries. Lower is better.`, rows: rows((m) => (m.replyRate != null ? Math.round((1 - m.replyRate) * 100) : 0)), series: [{ name: 'No reply', cls: 'after' }], legendSeries: legend, unit: '', format: pc }),
     ];
+    if (runs.some((r) => r.metrics.avgQuality != null)) {
+      charts.push(C.vbar({ title: 'Quality of replies (out of 5)', takeaway: first.avgQuality != null && last.avgQuality != null ? `From <b>${num(first.avgQuality, 1)}</b> to <b>${num(last.avgQuality, 1)}</b>. Higher is better.` : 'Checked by AI. Higher is better.', rows: rows((m) => (m.avgQuality == null ? 0 : Math.round(m.avgQuality * 10) / 10)), series: [{ name: 'Quality', cls: 'after' }], legendSeries: legend, unit: '', format: (v) => (v ? `${num(v, 1)}/5` : '–') }));
+    }
     if (runs.some((r) => r.metrics.hoursPerMonth != null)) {
       charts.push(C.vbar({ title: 'Time spent on enquiries a month', takeaway: 'Based on the minutes per enquiry you entered. Lower is better.', rows: rows((m) => Math.round((m.hoursPerMonth || 0) * 10) / 10), series: [{ name: 'Hours', cls: 'after' }], legendSeries: legend, unit: 'hours', format: (v) => `${num(v, 1)} hrs` }));
     }
@@ -1104,6 +1160,7 @@
     ['No reply found', (m) => num(m.unreplied), (m) => `${pct(m.replyRate == null ? null : 1 - m.replyRate)} of enquiries${m.unmatchable ? ` · ${m.unmatchable} form emails can't be checked` : ''}`],
     ['Went quiet, not chased', (m) => num(m.notChased), (m) => (m.wentQuiet ? `${m.chased} of ${m.wentQuiet} quiet customers were chased` : 'no customers went quiet')],
     ['Waiting on a reply', (m) => num(m.customerWaiting), () => 'customer\'s latest email unanswered'],
+    ['Reply quality', (m) => (m.avgQuality == null ? '–' : `${num(m.avgQuality, 1)}/5`), (m) => (m.qualityScored ? `average of ${m.qualityScored} replies checked by AI` : 'turn on AI to check replies')],
     ['Won (marked)', (m) => num(m.won), (m) => (m.won + m.lost ? `${pct(m.winRate)} of those marked won or lost` : 'mark outcomes in the Enquiries tab')],
     ['Arrived out of hours', (m) => num(m.outOfHours), (m) => (m.count ? `${pct(m.outOfHours / m.count)} of enquiries` : '')],
     ['Emails per enquiry', (m) => num(m.avgEmails, 1), () => 'both directions'],
@@ -1125,13 +1182,18 @@
         'Time spent a month': [a.m.hoursPerMonth, b.m.hoursPerMonth, true],
         'Replied within 1 hour': [a.m.within1h, b.m.within1h, false],
         'Replied within 24 hours': [a.m.within24h, b.m.within24h, false],
+        'Reply quality': [a.m.avgQuality, b.m.avgQuality, false],
       }[label];
       if (!ch || ch[0] == null || ch[1] == null || !a.m.count || !b.m.count) return '';
       const [x, y, lowerIsBetter] = ch;
       if (x === y) return '<span class="same">no change</span>';
       const better = lowerIsBetter ? y < x : y > x;
       let txt;
-      if (label.startsWith('Replied') || label === 'No reply found') {
+      if (label === 'Reply quality') {
+        const d = y - x;
+        if (Math.abs(d) < 0.15) return '<span class="same">about the same</span>';
+        txt = `${Math.abs(d) >= 1 ? 'much ' : ''}${better ? 'better' : 'worse'} (${d > 0 ? '+' : '−'}${num(Math.abs(d), 1)})`;
+      } else if (label.startsWith('Replied') || label === 'No reply found') {
         const d = Math.abs(y - x) * 100;
         txt = d < 2 ? (better ? 'about the same' : 'about the same') : `${d >= 20 ? 'much ' : ''}${better ? 'better' : 'worse'}`;
         if (d < 2) return '<span class="same">about the same</span>';
@@ -1192,7 +1254,8 @@
         <thead><tr><th class="no-print">Count</th><th>Received</th><th>From</th><th>Subject</th><th>First reply</th><th>${tab === 'counted' ? 'Where it stands' : 'Why not counted'}</th>${tab === 'counted' ? '<th>Outcome</th>' : ''}<th class="no-print"></th></tr></thead>
         <tbody>${rows.map((e) => {
           const h = e.firstReplyAt ? (e.firstReplyAt - e.receivedAt) / 3600000 : null;
-          const reply = !e.replyMatchable ? '<span class="muted">can\'t tell</span>' : (h == null ? '<span class="bad">none found</span>' : `${M.duration(h)}<small>${M.duration(M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000)} working</small>`);
+          const q = e.quality ? `<span class="qbadge q${e.quality.score}" title="${esc(e.quality.tip)}">Quality ${e.quality.score}/5</span>` : '';
+          const reply = !e.replyMatchable ? '<span class="muted">can\'t tell</span>' : (h == null ? '<span class="bad">none found</span>' : `${M.duration(h)}<small>${M.duration(M.workingMs(e.receivedAt, e.firstReplyAt, w) / 3600000)} working</small>${q}`);
           const period = ps.length > 1 ? (ps.find((p) => e.receivedAt >= p.from && e.receivedAt < p.to) || {}).label : '';
           const state = M.conversationState(e, asOf);
           const stateCls = { waiting: 'bad', 'quiet-not-chased': 'warn-text', 'no-reply': 'bad' }[state] || '';
@@ -1233,7 +1296,10 @@
     try {
       const r = await api('/api/thread', { mailboxes: Mailboxes.forAudit().filter((m) => m.token), refs: e.msgs || [] });
       const w = work();
-      body.innerHTML = `${(r.problems || []).map((p) => `<p class="bad">${esc(p)}</p>`).join('')}
+      const qc = e.quality ? `<div class="quality-box"><strong>Reply quality: ${e.quality.score}/5</strong>
+          <ul>${M.QUALITY_KEYS.map((k) => `<li class="${e.quality.checks[k] ? 'yes' : 'no'}"><b aria-hidden="true">${e.quality.checks[k] ? '✓' : '✕'}</b> ${esc(M.QUALITY_LABELS[k])}<span class="sr-only">: ${e.quality.checks[k] ? 'yes' : 'no'}</span></li>`).join('')}</ul>
+          ${e.quality.tip ? `<p><b>Tip:</b> ${esc(e.quality.tip)}</p>` : ''}</div>` : '';
+      body.innerHTML = `${qc}${(r.problems || []).map((p) => `<p class="bad">${esc(p)}</p>`).join('')}
         ${r.messages.map((m) => `<article class="mail ${m.direction}">
           <header><span class="who">${m.direction === 'out' ? 'Business' : 'Customer'}</span>
             <span class="muted">${m.date ? esc(new Date(m.date).toLocaleString('en-GB', { timeZone: w.tz, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : ''}</span></header>

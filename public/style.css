@@ -360,3 +360,15 @@ select.outcome { width: auto; margin: 0; padding: 4px 6px; font-size: 13px; }
 .mail-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
 @media print { select.outcome { display: none; } }
 @media (max-width: 600px) { .mail.out { margin-left: 8px; } .mail.in { margin-right: 8px; } }
+
+/* Reply quality */
+.qbadge { display: inline-block; margin-top: 4px; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; cursor: help; }
+.qbadge.q5, .qbadge.q4 { color: var(--good); }
+.qbadge.q3 { color: var(--warn); }
+.qbadge.q2, .qbadge.q1, .qbadge.q0 { color: var(--bad); }
+.quality-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 8px 0 12px; }
+.quality-box ul { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 3px; font-size: 14px; }
+.quality-box li.yes b { color: var(--good); }
+.quality-box li.no b { color: var(--bad); }
+.quality-box li.no { color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
