@@ -168,7 +168,8 @@
     if (e.lastInboundAt > lastOut) return 'waiting';
     if (asOf - lastOut < QUIET_DAYS * DAY) return 'ongoing';
     if (e.outsAfterLastIn == null) return 'unknown'; // audits saved before follow-ups were tracked
-    return e.outsAfterLastIn >= 2 ? 'quiet-chased' : 'quiet-not-chased';
+    const chased = e.followUps != null ? e.followUps >= 1 : e.outsAfterLastIn >= 2;
+    return chased ? 'quiet-chased' : 'quiet-not-chased';
   }
   const STATE_LABELS = {
     'no-reply': 'No reply found',

@@ -118,7 +118,14 @@ With AI turned on, each counted enquiry's **first reply from the business** is c
 4. Friendly and professional?
 5. Clear and easy to read?
 
-Each reply gets a score out of 5 and a one-line tip. The report shows the average score, the check most often missed ("At a glance"), a badge on each enquiry, the five ticks and crosses in **View**, a before-and-after comparison, and a "Quality of replies" progress chart. It runs automatically after AI sorting, or later with **Check reply quality** (the mailbox must be connected).
+Each reply gets a score out of 5 and a one-line tip.
+
+How the verdict works:
+- **The two checks that win work decide it.** "Good" needs an average of 4 or more **and** at least 80% of replies answering the question and giving a price or next step. Polite replies that don't answer can't score "Good".
+- **Small samples:** under 5 replies there's no verdict ("too few to judge yet") and it gives counts, e.g. "1 of 2 didn't answer the question". Under 10 it's called a rough guide and still uses counts.
+- **Real patterns only:** a missing check is only mentioned when at least 2 replies and 20% of them missed it.
+- **Holding replies:** if the first reply is a quick "thanks, we've got your enquiry" and the real answer follows within a day, the AI judges both together. Reply speed is still measured from the first one.
+- A **chase** (for "went quiet") means a follow-up sent at least about a day after the business's reply; a holding reply plus the answer doesn't count. The report shows the average score, the check most often missed ("At a glance"), a badge on each enquiry, the five ticks and crosses in **View**, a before-and-after comparison, and a "Quality of replies" progress chart. It runs automatically after AI sorting, or later with **Check reply quality** (the mailbox must be connected).
 
 **What's sent:** the customer's first email and the business's first reply, read live from the mailbox, with quoted history trimmed and up to about 2,000 characters each. Only the scores and tips are kept.
 

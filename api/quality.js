@@ -1,5 +1,6 @@
 // POST /api/quality: checks the business's first reply to each enquiry with AI.
-// Body: { business, mailboxes: [{ token }], items: [{ id, subject, ins: [{mb,f,uid}] (customer emails before the reply), out: {mb,f,uid} }] }
+// Body: { business, mailboxes: [{ token }], items: [{ id, subject, ins: [{mb,f,uid}] (customer emails before the reply),
+//   outs: [{mb,f,uid,at}] (the first reply, plus a second if it followed within a day) }] }
 // The two emails are read live (read-only) and sent to the AI; only the scores come back.
 const ai = require('../lib/ai');
 const { fetchBodies, bodyKey } = require('../lib/bodies');
@@ -14,8 +15,8 @@ module.exports = async function handler(req, res) {
   if (!body) return;
   if (!ai.enabled()) return send(res, 400, { error: 'AI isn\'t set up. In Vercel, add ANTHROPIC_API_KEY, then redeploy.' });
   const items = (Array.isArray(body.items) ? body.items : [])
-    .map((i) => ({ ...i, ins: (Array.isArray(i.ins) ? i.ins : [i.in]).filter(ok).slice(-5) }))
-    .filter((i) => i && Number.isInteger(Number(i.id)) && i.ins.length && ok(i.out)).slice(0, MAX_ITEMS);
+    .map((i) => ({ ...i, ins: (Array.isArray(i.ins) ? i.ins : [i.in]).filter(ok).slice(-5), outs: (Array.isArray(i.outs) ? i.outs : [i.out]).filter(ok).slice(0, 2) }))
+    .filter((i) => i && Number.isInteger(Number(i.id)) && i.ins.length && i.outs.length).slice(0, MAX_ITEMS);
   if (!items.length) return send(res, 400, { error: 'No replies to check.' });
   let accounts;
   try {
@@ -23,13 +24,15 @@ module.exports = async function handler(req, res) {
   } catch (err) {
     return send(res, 400, { error: err.message });
   }
-  const { found, problems } = await fetchBodies(accounts, items.flatMap((i) => [...i.ins, i.out]), { maxText: 3000 });
+  const { found, problems } = await fetchBodies(accounts, items.flatMap((i) => [...i.ins, ...i.outs]), { maxText: 3000 });
   // Everything the customer sent before the reply, with subject lines (the question is often only in the subject).
   const customerText = (ins) => ins.map((r) => found.get(bodyKey(r.mb, r.f, r.uid))).filter(Boolean)
     .map((m, n, all) => `${all.length > 1 ? `Email ${n + 1}: ` : ''}Subject: ${m.subject || '(none)'}\n${m.text || ''}`).join('\n---\n');
   const pairs = items.map((i) => {
-    const reply = found.get(bodyKey(i.out.mb, i.out.f, i.out.uid));
-    return { id: i.id, subject: i.subject || '', customer: customerText(i.ins), reply: reply ? `Subject: ${reply.subject || ''}\n${reply.text || ''}` : '' };
+    const replies = i.outs.map((r) => found.get(bodyKey(r.mb, r.f, r.uid))).filter(Boolean);
+    const gap = (a, b) => Math.round((Date.parse(b.date) - Date.parse(a.date)) / 60000);
+    const reply = replies.map((m, n) => `${replies.length > 1 ? (n === 0 ? 'Reply 1:\n' : `Reply 2 (sent ${gap(replies[0], m) >= 120 ? `${Math.round(gap(replies[0], m) / 60)} hours` : `${gap(replies[0], m)} minutes`} later):\n`) : ''}Subject: ${m.subject || ''}\n${m.text || ''}`).join('\n---\n');
+    return { id: i.id, subject: i.subject || '', customer: customerText(i.ins), reply };
   }).filter((p) => p.reply);
   if (!pairs.length) return send(res, 200, { results: [], problems: problems.length ? problems : ['The replies couldn\'t be read from the mailbox.'] });
   try {

@@ -642,8 +642,11 @@
         const r = await api('/api/quality', {
           business, mailboxes,
           items: batch.map((e) => {
-            const out = e.msgs.find((m) => m.d === 'out' && !m.mis);
-            return { id: e.id, subject: e.subject, ins: e.msgs.filter((m) => m.d === 'in' && m.at <= out.at).slice(-5), out };
+            // A quick holding reply ("thanks, we'll be in touch") followed by the real answer within a
+            // day is judged as one response. Reply speed is still measured from the first.
+            const replies = e.msgs.filter((m) => m.d === 'out' && !m.mis);
+            const outs = replies[1] && replies[1].at - replies[0].at <= 24 * 3600000 ? replies.slice(0, 2) : replies.slice(0, 1);
+            return { id: e.id, subject: e.subject, ins: e.msgs.filter((m) => m.d === 'in' && m.at <= replies[0].at).slice(-5), outs };
           }),
         });
         for (const v of r.results || []) {
@@ -1027,13 +1030,7 @@
     if (m.misdirected) {
       out.push({ s: 'bad', title: 'Replies that never reached the customer', text: `${m.misdirected} repl${m.misdirected === 1 ? 'y was' : 'ies were'} sent to the business's own address instead of the customer, usually by pressing Reply on a website-form email. The customer never got it.` });
     }
-    if (m.qualityScored) {
-      const q = m.avgQuality;
-      const weakest = M.QUALITY_KEYS.filter((k) => m.qualityShare[k] != null).sort((a, b) => m.qualityShare[a] - m.qualityShare[b])[0];
-      const s = q >= 4 ? 'good' : q >= 3 ? 'warn' : 'bad';
-      const weakText = weakest && m.qualityShare[weakest] < 0.8 ? ` Most often missing: <b>${M.QUALITY_LABELS[weakest].toLowerCase()}</b> (only ${pct(m.qualityShare[weakest])} of replies).` : '';
-      out.push({ s, html: true, title: 'Quality of replies', text: `Replies scored <b>${num(q, 1)} out of 5</b> on average (${m.qualityScored} checked by AI against five simple checks).${weakText}` });
-    }
+    if (m.qualityScored) out.push(qualityCheck(m));
     if (m.wentQuiet) {
       const s = m.notChased === 0 ? 'good' : m.notChased / m.wentQuiet <= 0.25 ? 'warn' : 'bad';
       out.push({ s, title: 'Following up when customers go quiet', text: m.notChased === 0 ? `All ${m.wentQuiet} customers who went quiet after a reply were followed up. Well done.` : `${m.notChased} of ${m.wentQuiet} customers went quiet after the business replied and were never chased. A friendly follow-up a few days later often wins the job.` });
@@ -1055,6 +1052,38 @@
       out.push({ s: m.avgEmails >= 4 ? 'warn' : 'good', title: 'Back-and-forth emails', text: m.avgEmails >= 4 ? `Each enquiry takes about ${num(m.avgEmails)} emails in total. Asking for details like phone number, address and photos in the first reply can cut this down.` : `Enquiries are sorted in about ${num(m.avgEmails)} emails each, which is efficient.` });
     }
     return out;
+  }
+
+  /**
+   * The "Quality of replies" verdict. The two checks that win work (answering the question and
+   * giving a price or next step) decide it; small samples get counts and no verdict.
+   */
+  function qualityCheck(m) {
+    const n = m.qualityScored;
+    const q = m.avgQuality;
+    const missed = (k) => Math.round((1 - m.qualityShare[k]) * n);
+    const answered = m.qualityShare.answered;
+    const nextStep = m.qualityShare.next_step;
+    // Only mention a gap that's a real pattern: missed by 2+ replies and 20%+ of them.
+    const weakest = M.QUALITY_KEYS.filter((k) => m.qualityShare[k] != null && missed(k) >= 2 && 1 - m.qualityShare[k] >= 0.2)
+      .sort((a, b) => m.qualityShare[a] - m.qualityShare[b])[0];
+    const share = (k) => (n < 10 ? `${n - missed(k)} of ${n} replies` : `only ${pct(m.qualityShare[k])} of replies`);
+    if (n < 5) {
+      const misses = M.QUALITY_KEYS.filter((k) => missed(k) > 0).map((k) => `${missed(k)} of ${n} didn't ${{ answered: 'answer the question', next_step: 'give a price or next step', asked_details: 'ask for what\'s needed', friendly: 'come across as friendly and professional', clear: 'read clearly' }[k]}`);
+      return { s: 'info', html: true, title: 'Quality of replies', text: `Only ${n} repl${n === 1 ? 'y' : 'ies'} checked, too few to judge yet. They scored ${num(q, 1)} out of 5${misses.length ? `; ${misses.join(', ')}` : ', with nothing missing'}.` };
+    }
+    let s;
+    if (q >= 4 && answered >= 0.8 && nextStep >= 0.8) s = 'good';
+    else if (q >= 3 && answered >= 0.6) s = 'warn';
+    else s = 'bad';
+    const keyText = s !== 'good' && (answered < 0.8 || nextStep < 0.8)
+      ? ` Answering the question and giving a price or next step matter most for winning work: ${n < 10 ? `${n - missed('answered')} of ${n}` : pct(answered)} answered it and ${n < 10 ? `${n - missed('next_step')} of ${n}` : pct(nextStep)} gave a price or next step.` : '';
+    // Don't repeat a gap the sentence above already covers.
+    const gap = keyText && ['answered', 'next_step'].includes(weakest)
+      ? M.QUALITY_KEYS.filter((k) => !['answered', 'next_step'].includes(k) && m.qualityShare[k] != null && missed(k) >= 2 && 1 - m.qualityShare[k] >= 0.2).sort((a, b) => m.qualityShare[a] - m.qualityShare[b])[0]
+      : weakest;
+    const weakText = gap ? ` ${keyText ? 'Also often missing' : 'Most often missing'}: <b>${M.QUALITY_LABELS[gap].toLowerCase()}</b> (${share(gap)}).` : '';
+    return { s, html: true, title: 'Quality of replies', text: `Replies scored <b>${num(q, 1)} out of 5</b> on average (${n} checked by AI${n < 10 ? ', so a rough guide' : ''}).${keyText}${weakText}` };
   }
 
   function glance(stats) {
@@ -1280,7 +1309,7 @@
     ['No reply found', (m) => num(m.unreplied), (m) => `${pct(m.replyRate == null ? null : 1 - m.replyRate)} of enquiries${m.unmatchable ? ` · ${m.unmatchable} form emails can't be checked` : ''}`],
     ['Went quiet, not chased', (m) => num(m.notChased), (m) => (m.wentQuiet ? `${m.chased} of ${m.wentQuiet} quiet customers were chased` : 'no customers went quiet')],
     ['Waiting on a reply', (m) => num(m.customerWaiting), () => 'customer\'s latest email unanswered'],
-    ['Reply quality', (m) => (m.avgQuality == null ? '–' : `${num(m.avgQuality, 1)}/5`), (m) => (m.qualityScored ? `average of ${m.qualityScored} replies checked by AI` : 'turn on AI to check replies')],
+    ['Reply quality', (m) => (m.avgQuality == null ? '–' : `${num(m.avgQuality, 1)}/5`), (m) => (m.qualityScored ? `average of ${m.qualityScored} repl${m.qualityScored === 1 ? 'y' : 'ies'} checked by AI${m.qualityScored < 5 ? ' (too few to judge)' : ''}` : 'turn on AI to check replies')],
     ['Won (marked)', (m) => num(m.won), (m) => (m.won + m.lost ? `${pct(m.winRate)} of those marked won or lost` : 'mark outcomes in the Enquiries tab')],
     ['Arrived out of hours', (m) => num(m.outOfHours), (m) => (m.count ? `${pct(m.outOfHours / m.count)} of enquiries` : '')],
     ['Emails per enquiry', (m) => num(m.avgEmails, 1), () => 'both directions'],

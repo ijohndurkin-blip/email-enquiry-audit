@@ -232,3 +232,14 @@ test('picks Archive and own folders, skips Sent, Trash, Spam and Gmail All Mail'
   ], 'INBOX.Sent');
   assert.deepStrictEqual(picked, ['Archive', 'INBOX.Quotes', 'Customers 2026']);
 });
+
+test('a holding reply followed by the answer is not a chase; a reply a day later is', () => {
+  const q = inMsg(T0, 'holly@shop.co.uk', 'Shop sign price');
+  const hold = outMsg(T0 + 60000, 'holly@shop.co.uk', 'Re: Shop sign price');
+  const answer = outMsg(T0 + 90 * 60000, 'holly@shop.co.uk', 'Re: Shop sign price');
+  let e = buildEnquiries([q, hold, answer], opts).enquiries[0];
+  assert.strictEqual(e.followUps, 0);
+  const chase = outMsg(T0 + 3 * D, 'holly@shop.co.uk', 'Just checking in');
+  e = buildEnquiries([q, hold, answer, chase], opts).enquiries[0];
+  assert.strictEqual(e.followUps, 1);
+});
