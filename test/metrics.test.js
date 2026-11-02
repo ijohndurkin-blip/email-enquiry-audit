@@ -83,3 +83,13 @@ test('reply quality averages and the most-missed check', () => {
   assert.strictEqual(m.qualityShare.next_step, 0.5);
   assert.strictEqual(m.qualityShare.answered, 1);
 });
+
+test('time spent per week, month and year', () => {
+  const from = london(2026, 10, 1, 0);
+  const list = Array.from({ length: 30 }, (_, i) => ({ receivedAt: from + i * 24 * H + H, inboundCount: 1, outboundCount: 0, mailboxes: [] }));
+  const m = M.compute(list, { ...w, from, to: from + 30 * 24 * H, minutesPerEnquiry: 12 });
+  // 30 enquiries in 30 days at 12 min: 6 hrs/month, 1.4 hrs/week, 73 hrs/year
+  assert.strictEqual(Math.round(m.hoursPerMonth * 10) / 10, 6);
+  assert.strictEqual(Math.round(m.hoursPerWeek * 10) / 10, 1.4);
+  assert.strictEqual(Math.round(m.hoursPerYear), 73);
+});

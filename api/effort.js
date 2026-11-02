@@ -44,6 +44,7 @@ module.exports = async function handler(req, res) {
   }
   const results = prepared.map((i) => ({
     id: i.id,
+    replies: i.replies.length,
     ...estimate({
       customerText: i.customer,
       replies: i.replies.map((r) => ({ text: r.msg.text, attachments: r.msg.attachments, flags: flags.get(`${i.id}:${r.n}`) })),

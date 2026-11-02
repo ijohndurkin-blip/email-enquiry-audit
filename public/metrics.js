@@ -144,6 +144,8 @@
       qualityShare,
       minutesPerEnquiry: Number.isFinite(mins) && mins > 0 ? mins : null,
       hoursPerMonth: Number.isFinite(mins) && mins > 0 ? (perMonth(enquiries.length) * mins) / 60 : null,
+      hoursPerWeek: Number.isFinite(mins) && mins > 0 ? ((enquiries.length * 7) / days * mins) / 60 : null,
+      hoursPerYear: Number.isFinite(mins) && mins > 0 ? ((enquiries.length * 365) / days * mins) / 60 : null,
     };
   }
 

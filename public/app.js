@@ -26,6 +26,8 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
   const num = (x, d = 0) => (x == null ? '–' : (Math.round(x * 10 ** d) / 10 ** d).toLocaleString('en-GB'));
+  /** "about 9 working days" (7.5-hour days), or "under a day's work". */
+  const workDays = (hours) => (hours >= 7.5 ? `about ${num(hours / 7.5, 0)} working day${Math.round(hours / 7.5) === 1 ? '' : 's'}` : 'under a day\'s work');
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   // --- Talking to the server -----------------------------------------------------
@@ -696,8 +698,22 @@
     const share = (k) => Math.round((estimate.notes[k] || 0) / estimate.n * 100);
     const notes = ['looked up prices', 'worked out a quote', 'checked dates', 'technical answer', 'attached a document', 'mostly a standard reply'].filter((k) => estimate.notes[k]).map((k) => `${k} in ${share(k)}%`);
     const fromApp = audit && audit.meta && audit.meta.kind === 'checkpoint';
+    // Totals use this audit's enquiry count over its period, at the estimated minutes.
+    const stat = audit ? periodStats().slice(-1)[0] : null;
+    const m = stat ? stat.m : null;
+    const min = estimate.minutes;
+    const totals = m && m.count ? `<div class="est-totals">
+        <div><span>Per enquiry</span><b>${num(min, 1)} min</b><small>the whole conversation</small></div>
+        <div><span>Per reply</span><b>${num(estimate.perReply, 1)} min</b><small>${num(estimate.repliesPerEnquiry, 1)} replies per enquiry</small></div>
+        <div><span>This audit</span><b>${M.duration(m.count * min / 60)}</b><small>${m.count} enquir${m.count === 1 ? 'y' : 'ies'} in ${Math.round(m.days)} days</small></div>
+        <div><span>A week</span><b>${num(m.count * 7 / m.days * min / 60, 1)} hrs</b></div>
+        <div><span>A month</span><b>${num(m.count * 30 / m.days * min / 60, 1)} hrs</b></div>
+        <div class="year"><span>A year</span><b>${num(m.count * 365 / m.days * min / 60, 0)} hrs</b><small>${workDays(m.count * 365 / m.days * min / 60)}</small></div>
+      </div>` : '';
     box.innerHTML = `<div class="estimate-box">
-      <strong>About ${num(estimate.minutes, 1)} minutes per enquiry</strong> <small class="muted">estimated from ${estimate.n} enquir${estimate.n === 1 ? 'y' : 'ies'}${estimate.usedAi ? ', with AI reading the context' : ', word counts only'}</small>
+      <strong>About ${num(estimate.minutes, 1)} minutes per enquiry</strong> <small class="muted">the whole conversation, every reply and follow-up · estimated from ${estimate.n} enquir${estimate.n === 1 ? 'y' : 'ies'}${estimate.usedAi ? ', with AI reading the context' : ', word counts only'}</small>
+      ${totals}
+      <p class="hint" style="margin:8px 0 2px">Where the time per enquiry goes:</p>
       <div class="est-parts">
         <span>Reading the customer's emails <b>${num(p.reading, 1)} min</b></span>
         <span>Writing the replies <b>${num(p.writing, 1)} min</b></span>
@@ -743,7 +759,8 @@
       const notes = {};
       results.forEach((x) => x.notes.forEach((n) => { notes[n] = (notes[n] || 0) + 1; }));
       const minutes = results.reduce((a, x) => a + x.minutes, 0) / results.length;
-      estimate = { minutes, parts, n: results.length, usedAi, notes, at: Date.now() };
+      const replies = results.reduce((a, x) => a + (x.replies || 0), 0);
+      estimate = { minutes, parts, n: results.length, usedAi, notes, at: Date.now(), repliesPerEnquiry: replies / results.length, perReply: replies ? results.reduce((a, x) => a + x.minutes, 0) / replies : minutes };
       form.minsA.value = String(Math.round(minutes * 2) / 2);
       setStatus(`Estimated about ${num(minutes, 1)} minutes per enquiry and filled it in. Check it against a stopwatch on a few replies.`, 'ok');
       if (profileId) saveProfile();
@@ -1266,7 +1283,7 @@
         noEmailReplyFound: m.unreplied, websiteFormsWithoutCustomerAddress: m.unmatchable,
         arrivedOutOfHours: m.outOfHours, emailsPerEnquiry: r1(m.avgEmails), viaWebsiteForm: m.viaForm,
         busiestDay: busiest(m.byWeekday, DAYS), busiestHour: busiest(m.byHour, m.byHour.map((_, h) => `${h}:00`)),
-        minutesPerEnquiry: m.minutesPerEnquiry, hoursPerMonthOnEnquiries: r1(m.hoursPerMonth),
+        minutesPerEnquiry: m.minutesPerEnquiry, hoursPerMonthOnEnquiries: r1(m.hoursPerMonth), hoursPerWeekOnEnquiries: r1(m.hoursPerWeek), hoursPerYearOnEnquiries: m.hoursPerYear == null ? null : Math.round(m.hoursPerYear),
         customersWentQuietAfterReply: m.wentQuiet, quietCustomersChased: m.chased, quietCustomersNotChased: m.notChased,
         replyQualityOutOf5: r1(m.avgQuality), repliesQualityChecked: m.qualityScored,
         replyQualityChecksPassedPct: m.qualityScored ? Object.fromEntries(M.QUALITY_KEYS.map((k) => [M.QUALITY_LABELS[k], pc(m.qualityShare[k])])) : null,
@@ -1452,7 +1469,8 @@
     ['Arrived out of hours', (m) => num(m.outOfHours), (m) => (m.count ? `${pct(m.outOfHours / m.count)} of enquiries` : '')],
     ['Emails per enquiry', (m) => num(m.avgEmails, 1), () => 'both directions'],
     ['From the website form', (m) => num(m.viaForm), (m) => (m.count ? `${pct(m.viaForm / m.count)} of enquiries` : '')],
-    ['Time spent a month', (m) => (m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`), (m) => (m.minutesPerEnquiry ? `at ${num(m.minutesPerEnquiry, 1)} min an enquiry${estimate && !estimate.edited && Number(form.minsA.value) === m.minutesPerEnquiry ? ' (estimated from the emails)' : ''}` : 'enter minutes per enquiry above')],
+    ['Time spent a month', (m) => (m.hoursPerMonth == null ? '–' : `${num(m.hoursPerMonth, 1)} hrs`), (m) => (m.minutesPerEnquiry ? `${num(m.hoursPerWeek, 1)} hrs a week · <b>${num(m.hoursPerYear, 0)} hrs a year</b> · at ${num(m.minutesPerEnquiry, 1)} min an enquiry${estimate && !estimate.edited && Number(form.minsA.value) === m.minutesPerEnquiry ? ' (estimated from the emails)' : ''}` : 'enter minutes per enquiry above')],
+    ['Time spent a year', (m) => (m.hoursPerYear == null ? '–' : `${num(m.hoursPerYear, 0)} hrs`), (m) => (m.hoursPerYear == null ? 'enter minutes per enquiry above' : `${workDays(m.hoursPerYear)} a year (7.5-hour days)`)],
   ];
 
   function tiles(m) {
@@ -1467,6 +1485,7 @@
         'In working hours': [a.m.medianWorkingReplyHours, b.m.medianWorkingReplyHours, true],
         'No reply found': [a.m.replyRate == null ? null : 1 - a.m.replyRate, b.m.replyRate == null ? null : 1 - b.m.replyRate, true],
         'Time spent a month': [a.m.hoursPerMonth, b.m.hoursPerMonth, true],
+        'Time spent a year': [a.m.hoursPerYear, b.m.hoursPerYear, true],
         'Replied within 1 hour': [a.m.within1h, b.m.within1h, false],
         'Replied within 24 hours': [a.m.within24h, b.m.within24h, false],
         'Reply quality': [a.m.avgQuality, b.m.avgQuality, false],
@@ -1485,6 +1504,7 @@
         txt = d < 2 ? (better ? 'about the same' : 'about the same') : `${d >= 20 ? 'much ' : ''}${better ? 'better' : 'worse'}`;
         if (d < 2) return '<span class="same">about the same</span>';
       } else if (label === 'Time spent a month') txt = `${num(Math.abs(x - y), 1)} hrs ${y < x ? 'less' : 'more'}`;
+      else if (label === 'Time spent a year') txt = `${num(Math.abs(x - y), 0)} hrs ${y < x ? 'less' : 'more'}`;
       else if (lowerIsBetter && y < 0.05) txt = 'almost instant now';
       else if (lowerIsBetter && y > 0 && x / y >= 2) txt = `${num(x / y, x / y >= 10 ? 0 : 1)}× faster`;
       else txt = `${Math.round(Math.abs(1 - y / (x || 1)) * 100)}% ${y < x ? (lowerIsBetter ? 'faster' : 'lower') : (lowerIsBetter ? 'slower' : 'higher')}`;
@@ -1503,7 +1523,7 @@
     if (m.medianReplyHours != null) parts.push(`Half were answered within <b>${M.duration(m.medianReplyHours)}</b>${m.medianWorkingReplyHours != null ? ` (${M.duration(m.medianWorkingReplyHours)} of working time)` : ''}, and ${pct(m.within1h)} within an hour.`);
     if (m.unreplied) parts.push(`<b>${m.unreplied}</b> got no email reply that we could find.`);
     if (m.outOfHours) parts.push(`${pct(m.outOfHours / m.count)} arrived outside opening hours.`);
-    if (m.hoursPerMonth != null) parts.push(`At ${num(m.minutesPerEnquiry, 1)} minutes each, that's <b>${num(m.hoursPerMonth, 1)} hours a month</b> spent on enquiries.`);
+    if (m.hoursPerMonth != null) parts.push(`At ${num(m.minutesPerEnquiry, 1)} minutes each, that's about <b>${num(m.hoursPerWeek, 1)} hours a week</b>, <b>${num(m.hoursPerMonth, 1)} hours a month</b> or <b>${num(m.hoursPerYear, 0)} hours a year</b> spent on enquiries.`);
     return parts.join(' ');
   }
 
@@ -1514,7 +1534,8 @@
     if (a.m.minutesPerEnquiry == null || b.m.minutesPerEnquiry == null) return '<p class="hint">Enter minutes per enquiry for both periods to show the time saved.</p>';
     // Time saved on the enquiries that actually came in after: old minutes vs new minutes each.
     const saved = (b.m.perMonth * (a.m.minutesPerEnquiry - b.m.minutesPerEnquiry)) / 60;
-    return `<p class="headline">${saved >= 0 ? `About <b>${num(saved, 1)} hours a month saved</b>` : `About ${num(-saved, 1)} hours a month more`} on enquiries (${num(b.m.perMonth)} enquiries a month at ${num(b.m.minutesPerEnquiry, 1)} min each instead of ${num(a.m.minutesPerEnquiry, 1)})${a.m.medianReplyHours && b.m.medianReplyHours ? `, with typical replies going from ${M.duration(a.m.medianReplyHours)} to ${M.duration(b.m.medianReplyHours)}` : ''}.</p>`;
+    const perYear = saved * 365 / 30;
+    return `<p class="headline">${saved >= 0 ? `About <b>${num(saved, 1)} hours a month saved</b>, or <b>${num(perYear, 0)} hours a year</b> (${workDays(perYear)}),` : `About ${num(-saved, 1)} hours a month more`} on enquiries (${num(b.m.perMonth)} enquiries a month at ${num(b.m.minutesPerEnquiry, 1)} min each instead of ${num(a.m.minutesPerEnquiry, 1)})${a.m.medianReplyHours && b.m.medianReplyHours ? `, with typical replies going from ${M.duration(a.m.medianReplyHours)} to ${M.duration(b.m.medianReplyHours)}` : ''}.</p>`;
   }
 
   function table(r, ps, w) {
